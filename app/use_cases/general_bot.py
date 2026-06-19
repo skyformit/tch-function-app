@@ -15,42 +15,106 @@ from app.use_cases.lookup_classifier import classify_lookup_input
 from app.use_cases.tbms.transport import _call_tbms_api
 from app.use_cases.trade_license_routing import classify_trade_license_routing
 
-SMALL_TALK_RESPONSES = {
-    "hi": "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "hi there": "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "hey": "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "hey there": "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "hello": "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "hello there": "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good day": "Good day. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good morning": "Good morning. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good morning team": "Good morning. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good morning everyone": "Good morning. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good afternoon": "Good afternoon. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good afternoon team": "Good afternoon. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good afternoon everyone": "Good afternoon. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good evening": "Good evening. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good evening team": "Good evening. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "good evening everyone": "Good evening. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "morning": "Good morning. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "afternoon": "Good afternoon. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "evening": "Good evening. How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "how are you": "I’m here to help with vendor lookup, trade license, VAT, and document workflows.",
-    "how are you today": "I’m here to help with vendor lookup, trade license, VAT, and document workflows.",
-    "how do you do": "I’m here to help with vendor lookup, trade license, VAT, and document workflows.",
-    "thanks": "You’re welcome. How can I help further?",
-    "thank you": "You’re welcome. How can I help further?",
-    "thank you so much": "You’re welcome. How can I help further?",
-    "much appreciated": "You’re welcome. How can I help further?",
-    "bye": "Goodbye. Reach out anytime you need help with compliance or vendor workflows.",
-    "goodbye": "Goodbye. Reach out anytime you need help with compliance or vendor workflows.",
-    "see you": "Goodbye. Reach out anytime you need help with compliance or vendor workflows.",
-    "see you later": "Goodbye. Reach out anytime you need help with compliance or vendor workflows.",
-    "see you soon": "Goodbye. Reach out anytime you need help with compliance or vendor workflows.",
-    "ok": "How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "okay": "How can I help you with vendor lookup, trade license, VAT, or document upload?",
-    "sure": "How can I help you with vendor lookup, trade license, VAT, or document upload?",
-}
+_GREETINGS = (
+    "hi",
+    "hi there",
+    "hey",
+    "hey there",
+    "hello",
+    "hello there",
+    "good day",
+    "good morning",
+    "good morning team",
+    "good morning everyone",
+    "good afternoon",
+    "good afternoon team",
+    "good afternoon everyone",
+    "good evening",
+    "good evening team",
+    "good evening everyone",
+    "morning",
+    "afternoon",
+    "evening",
+)
+
+_STATUS_PHI = (
+    "how are you",
+    "how are you today",
+    "how do you do",
+)
+
+_IDENTITY_PHRASES = (
+    "who are you",
+    "what are you",
+    "what is your name",
+    "tell me about yourself",
+    "tell me who you are",
+    "are you a bot",
+    "are you human",
+)
+
+_CAPABILITY_PHRASES = (
+    "what can you do",
+    "what do you do",
+    "how can you help",
+    "how can you help me",
+    "can you help me",
+    "help",
+    "i need help",
+    "need help",
+    "what services do you offer",
+    "what services can you offer",
+)
+
+_THANKS_PHRASES = (
+    "thanks",
+    "thank you",
+    "thank you so much",
+    "much appreciated",
+)
+
+_FAREWELL_PHRASES = (
+    "bye",
+    "goodbye",
+    "see you",
+    "see you later",
+    "see you soon",
+)
+
+_AFFIRMATION_PHRASES = (
+    "ok",
+    "okay",
+    "sure",
+)
+
+
+def _build_phrase_response_map() -> dict[str, str]:
+    responses: dict[str, str] = {}
+    greetings = "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?"
+    status = "I’m here to help with vendor lookup, trade license, VAT, and document workflows."
+    identity = "I’m your UAE Business Compliance Assistant for vendor lookup, trade license, VAT, and document workflows."
+    capabilities = "I can help with vendor lookup, trade license checks, VAT, document uploads, and workflow routing."
+    thanks = "You’re welcome. How can I help further?"
+    farewell = "Goodbye. Reach out anytime you need help with compliance or vendor workflows."
+
+    for phrase in _GREETINGS:
+        responses[phrase] = greetings
+    for phrase in _STATUS_PHI:
+        responses[phrase] = status
+    for phrase in _IDENTITY_PHRASES:
+        responses[phrase] = identity
+    for phrase in _CAPABILITY_PHRASES:
+        responses[phrase] = capabilities
+    for phrase in _THANKS_PHRASES:
+        responses[phrase] = thanks
+    for phrase in _FAREWELL_PHRASES:
+        responses[phrase] = farewell
+    for phrase in _AFFIRMATION_PHRASES:
+        responses[phrase] = greetings
+    return responses
+
+
+SMALL_TALK_RESPONSES = _build_phrase_response_map()
 
 
 def _missing_configuration_response(name: str):
@@ -109,7 +173,7 @@ def _has_business_intent(text: str) -> bool:
         "workflow",
         "tbms",
     )
-    return any(keyword in normalized_text for keyword in keywords) or bool(re.search(r"\b\d{4,}\b", normalized_text))
+    return any(keyword in normalized_text for keyword in keywords)
 
 
 def _small_talk_response(text: str, body: dict):
@@ -189,7 +253,7 @@ def _extract_license_number(text: str) -> Optional[str]:
         r"\b(?:trade\s*)?(?:licen[cs]e|licence)(?:\s*(?:no\.?|number))?\s*[:\-]?\s*(\d{4,})\b",
         r"\b([A-Z]{1,5}-\d{3,}(?:\s+\d{3,})*)\b",
         r"\b(\d{3,}(?:\s+\d{3,})+)\b",
-        r"\b(\d{4,})\b",
+        r"\b(\d{5,})\b",
     ]
     for pattern in patterns:
         match = re.search(pattern, text or "", flags=re.IGNORECASE)
@@ -343,15 +407,15 @@ async def _lookup_response(text: str):
 
 def _lookup_payloads(label: str, company_text: str, license_number: Optional[str]) -> list[dict]:
     payloads: list[dict] = []
-    if license_number and company_text:
+    if label in {"company_name", "trade_license_number"} and license_number and company_text:
         payloads.append({"vendorName": company_text, "vendId": -1, "licenseNo": license_number, "email": "", "statusId": -1})
         payloads.append({"vendorName": "", "vendId": -1, "licenseNo": license_number, "email": "", "statusId": -1})
         payloads.append({"vendorName": company_text, "vendId": -1, "licenseNo": "", "email": "", "statusId": -1})
         return payloads
-    if label == "trade_license_number" or license_number:
+    if label == "trade_license_number":
         payloads.append({"vendorName": "", "vendId": -1, "licenseNo": license_number or company_text, "email": "", "statusId": -1})
         return payloads
-    if label == "company_name" or company_text:
+    if label == "company_name":
         payloads.append({"vendorName": company_text, "vendId": -1, "licenseNo": "", "email": "", "statusId": -1})
     return payloads
 

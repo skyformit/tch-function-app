@@ -51,6 +51,40 @@ class GeneralBotSmallTalkTest(unittest.TestCase):
         self.assertEqual(payload["source_type"], "backend")
         self.assertEqual(payload["response_type"], "small_talk")
 
+    def test_who_are_you_is_answered_without_foundry_call(self) -> None:
+        request = _FakeRequest({"text": "who are you"})
+
+        with patch("app.use_cases.general_bot._resolve_config") as resolve_config, patch("app.use_cases.general_bot._invoke_general_bot_workflow") as invoke_workflow:
+            response = asyncio.run(invoke_general_bot(request))
+
+        resolve_config.assert_not_called()
+        invoke_workflow.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        raw_body = getattr(response, "body", None) or response.get_body()
+        payload = json.loads(raw_body.decode())
+        self.assertEqual(payload["source"], "backend")
+        self.assertEqual(payload["origin"], "backend")
+        self.assertEqual(payload["source_type"], "backend")
+        self.assertEqual(payload["response_type"], "small_talk")
+        self.assertIn("Business Compliance Assistant", payload["text"])
+
+    def test_what_can_you_do_is_answered_without_foundry_call(self) -> None:
+        request = _FakeRequest({"text": "what can you do"})
+
+        with patch("app.use_cases.general_bot._resolve_config") as resolve_config, patch("app.use_cases.general_bot._invoke_general_bot_workflow") as invoke_workflow:
+            response = asyncio.run(invoke_general_bot(request))
+
+        resolve_config.assert_not_called()
+        invoke_workflow.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        raw_body = getattr(response, "body", None) or response.get_body()
+        payload = json.loads(raw_body.decode())
+        self.assertEqual(payload["source"], "backend")
+        self.assertEqual(payload["origin"], "backend")
+        self.assertEqual(payload["source_type"], "backend")
+        self.assertEqual(payload["response_type"], "small_talk")
+        self.assertIn("vendor lookup", payload["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

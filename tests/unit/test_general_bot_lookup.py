@@ -127,6 +127,20 @@ class GeneralBotLookupTest(unittest.TestCase):
         payload = json.loads((getattr(response, "body", None) or response.get_body()).decode())
         self.assertTrue(payload["ok"])
 
+    def test_non_business_year_question_does_not_go_to_tbms(self) -> None:
+        request = _FakeRequest({"text": "who win world cup cricket 1983"})
+
+        with patch("app.use_cases.general_bot._call_tbms_api") as call_tbms, patch(
+            "app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)
+        ), patch("app.use_cases.general_bot._invoke_general_bot_workflow", new=AsyncMock(return_value=(200, {"ok": True, "text": "LLM answer"}))) as invoke_workflow:
+            response = asyncio.run(invoke_general_bot(request))
+
+        call_tbms.assert_not_called()
+        invoke_workflow.assert_called_once()
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads((getattr(response, "body", None) or response.get_body()).decode())
+        self.assertEqual(payload["source"], "llm")
+
     def test_tbms_parse_error_reports_body_shape(self) -> None:
         from app.use_cases.general_bot import _tbms_http_response_to_payload
 
