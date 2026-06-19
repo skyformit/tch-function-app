@@ -26,6 +26,12 @@ class _FakeTbmsResponse:
         return json.dumps(self._payload).encode()
 
 
+class _FakeTextTbmsResponse:
+    def __init__(self, text: str, status_code: int = 200) -> None:
+        self.text = text
+        self.status_code = status_code
+
+
 class GeneralBotLookupTest(unittest.TestCase):
     def test_non_lookup_text_returns_llm_source(self) -> None:
         request = _FakeRequest({"text": "Please summarize the latest vendor changes."})
@@ -120,6 +126,14 @@ class GeneralBotLookupTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads((getattr(response, "body", None) or response.get_body()).decode())
         self.assertTrue(payload["ok"])
+
+    def test_tbms_parse_error_reports_body_shape(self) -> None:
+        from app.use_cases.general_bot import _tbms_http_response_to_payload
+
+        payload = _tbms_http_response_to_payload(_FakeTextTbmsResponse("not-json", 502))
+        self.assertEqual(payload["error"]["code"], "response_parse_error")
+        self.assertEqual(payload["error"]["body_type"], "str")
+        self.assertEqual(payload["error"]["status_code"], 502)
 
     def test_greeting_prefixed_company_name_strips_greeting_before_lookup(self) -> None:
         request = _FakeRequest({"text": "hello Abdul Jaleel Al Saadi Trading LLC"})

@@ -281,10 +281,34 @@ def _lookup_clarification_response() -> dict:
 
 
 def _tbms_http_response_to_payload(response) -> dict:
+    body = None
+    body_type = None
     try:
-        return json.loads(response.get_body().decode())
+        if hasattr(response, "get_body"):
+            body = response.get_body()
+        elif hasattr(response, "body"):
+            body = response.body
+        elif hasattr(response, "text"):
+            body = response.text
+        body_type = type(body).__name__ if body is not None else None
+        if isinstance(body, bytes):
+            body = body.decode("utf-8", errors="replace")
+        if isinstance(body, str) and body.strip():
+            return json.loads(body)
+        if isinstance(body, dict):
+            return body
     except Exception:
-        return {"ok": False, "error": {"code": "response_parse_error", "message": "Failed to parse TBMS response"}}
+        pass
+    return {
+        "ok": False,
+        "error": {
+            "code": "response_parse_error",
+            "message": "Failed to parse TBMS response",
+            "body_type": body_type,
+            "raw_body": body if isinstance(body, str) else None,
+            "status_code": getattr(response, "status_code", None),
+        },
+    }
 
 
 def _annotate_source(payload: dict, source: str) -> dict:
