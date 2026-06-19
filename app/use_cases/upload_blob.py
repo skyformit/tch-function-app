@@ -5,6 +5,7 @@ from typing import Optional
 import azure.functions as func
 
 from app.core.config import settings
+from app.infrastructure.external.foundry.common import _with_response_metadata
 from app.infrastructure.storage.blob_storage import clean_name, document_type, upload_blob_bytes
 from core.foundry import _json_response
 
@@ -60,8 +61,12 @@ def _upload_result(
 
 
 def _with_success_metadata(result: dict, file_name: str, resolved_document_type: Optional[str]) -> dict:
-    result.update({"ok": True, "file_name": file_name, "document_type": document_type(resolved_document_type if isinstance(resolved_document_type, str) else None)})
-    return result
+    return _with_response_metadata({
+        **result,
+        "ok": True,
+        "file_name": file_name,
+        "document_type": document_type(resolved_document_type if isinstance(resolved_document_type, str) else None),
+    }, "storage")
 
 
 def _request_content_type(req) -> str:

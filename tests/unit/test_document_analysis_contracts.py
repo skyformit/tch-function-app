@@ -11,6 +11,7 @@ from app.use_cases.document_analysis import (
     build_document_analysis_response,
     build_trade_license_response,
 )
+from app.use_cases.upload_blob import _with_success_metadata
 
 
 class DocumentAnalysisContractsTest(unittest.TestCase):
@@ -48,6 +49,9 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
 
         payload = build_document_analysis_response(outcome, VAT_PROFILE)
         self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["source"], "document_intelligence")
+        self.assertEqual(payload["origin"], "document_intelligence")
+        self.assertEqual(payload["source_type"], "document_intelligence")
         self.assertIn("TaxRegistrationNumber", payload["results"])
 
     def test_trade_license_response_drops_arabic_name_values(self) -> None:
@@ -81,6 +85,9 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
 
         payload = build_trade_license_response(outcome, ["BusinessName", "TradeNameEnglish"])
         self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["source"], "document_intelligence")
+        self.assertEqual(payload["origin"], "document_intelligence")
+        self.assertEqual(payload["source_type"], "document_intelligence")
         self.assertNotIn("BusinessName", payload["results"])
         self.assertIn("TradeNameEnglish", payload["results"])
 
@@ -172,6 +179,13 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
         self.assertEqual(extras["gpt_review"]["is_consistent"], True)
         self.assertEqual(extras["gpt_review"]["plausibility_score"], 0.98)
+
+    def test_upload_blob_response_includes_storage_source(self) -> None:
+        payload = _with_success_metadata({"container": "vendor-docs"}, "sample.pdf", "trade")
+        self.assertEqual(payload["source"], "storage")
+        self.assertEqual(payload["origin"], "storage")
+        self.assertEqual(payload["source_type"], "storage")
+        self.assertTrue(payload["ok"])
 
 
 if __name__ == "__main__":

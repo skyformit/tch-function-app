@@ -58,10 +58,17 @@ def _json_response(payload: dict, status_code: int = 200) -> func.HttpResponse:
     return JSONResponse(payload, status_code=status_code)
 
 
+def _with_response_metadata(payload: dict, source: str) -> dict:
+    combined = dict(payload)
+    combined["source"] = source
+    combined["origin"] = source
+    combined["source_type"] = source
+    return combined
+
+
 def _sse_frame(event: Optional[str], payload: object) -> bytes:
     payload_text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
     frame_parts = [f"event: {event}"] if event else []
     frame_parts.extend(f"data: {line}" for line in (payload_text.splitlines() or [""]))
     frame_parts.append("")
     return ("\n".join(frame_parts) + "\n").encode("utf-8")
-
