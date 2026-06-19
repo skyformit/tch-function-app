@@ -3,7 +3,7 @@ from functools import partial
 
 from azurefunctions.extensions.http.fastapi import Request
 
-from app.core.config import foundry_agent_name, foundry_project_endpoint, foundry_token_scope
+from app.core.config import foundry_project_endpoint, foundry_token_scope, general_chat_agent_id
 from app.infrastructure.external.foundry_client import _json_response, invoke_foundry_from_text
 from app.use_cases.foundry_workflow import _body_text, _conversation_id, _json_body
 
@@ -24,12 +24,12 @@ def _validate_body(body: dict):
 
 def _resolve_config():
     project_endpoint = foundry_project_endpoint()
-    agent_id = foundry_agent_name()
+    agent_id = general_chat_agent_id()
     token_scope = foundry_token_scope()
     if not project_endpoint:
         return None, _missing_configuration_response("FOUNDRY_PROJECT_ENDPOINT")
     if not agent_id:
-        return None, _missing_configuration_response("FOUNDRY_AGENT_NAME")
+        return None, _missing_configuration_response("GENERAL_CHAT_AGENT_ID")
     return {"project_endpoint": project_endpoint, "agent_id": agent_id, "token_scope": token_scope}, None
 
 

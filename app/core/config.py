@@ -11,6 +11,7 @@ class Settings:
     foundry_project_endpoint: str = _env("FOUNDRY_PROJECT_ENDPOINT")
     foundry_agent_name: str = _env("FOUNDRY_AGENT_NAME")
     foundry_token_scope: str = _env("FOUNDRY_TOKEN_SCOPE", "https://ai.azure.com/.default")
+    general_chat_agent_id: str = _env("GENERAL_CHAT_AGENT_ID")
     source_api_url: str = _env("SOURCE_API_URL")
     source_api_key: str = _env("SOURCE_API_KEY")
     source_api_key_header: str = _env("SOURCE_API_KEY_HEADER", "X-Api-Key")
@@ -61,6 +62,10 @@ def foundry_agent_name() -> str:
 
 def foundry_token_scope() -> str:
     return settings.foundry_token_scope
+
+
+def general_chat_agent_id() -> str:
+    return settings.general_chat_agent_id
 
 
 def source_api_url() -> str:

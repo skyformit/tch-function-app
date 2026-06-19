@@ -16,7 +16,7 @@ The code is split into:
 There is also a General Bot route:
 
 - `POST /api/invoke-general-bot`
-- Uses `FOUNDRY_AGENT_NAME`
+- Uses `GENERAL_CHAT_AGENT_ID`
 - Uses `FOUNDRY_PROJECT_ENDPOINT`
 - Uses `FOUNDRY_TOKEN_SCOPE`
 
@@ -276,6 +276,7 @@ Set these app settings:
 - `FOUNDRY_PROJECT_ENDPOINT`
 - `FOUNDRY_AGENT_NAME`
 - `FOUNDRY_TOKEN_SCOPE`
+- `GENERAL_CHAT_AGENT_ID`
 - `SOURCE_API_URL`
 - `SOURCE_API_KEY`
 - `SOURCE_API_KEY_HEADER`
