@@ -61,6 +61,11 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
                 "contents": [
                     {
                         "fields": {
+                            "CompanyName": {
+                                "type": "string",
+                                "valueString": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)",
+                                "confidence": 0.89,
+                            },
                             "BusinessName": {
                                 "type": "string",
                                 "valueString": "شركة مركز المعدات الإنشائية (ذ.م.م)",
@@ -83,11 +88,12 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             upload_skipped=True,
         )
 
-        payload = build_trade_license_response(outcome, ["BusinessName", "TradeNameEnglish"])
+        payload = build_trade_license_response(outcome, ["CompanyName", "BusinessName", "TradeNameEnglish"])
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["source"], "document_intelligence")
         self.assertEqual(payload["origin"], "document_intelligence")
         self.assertEqual(payload["source_type"], "document_intelligence")
+        self.assertIn("CompanyName", payload["results"])
         self.assertNotIn("BusinessName", payload["results"])
         self.assertIn("TradeNameEnglish", payload["results"])
 

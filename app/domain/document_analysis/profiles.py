@@ -92,6 +92,7 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
         "LicenceNo",
         "LicenceNumber",
         "LicenceActivities",
+        "CompanyName",
         "TradeName",
         "TradeNameEnglish",
         "OperatingName",
@@ -103,11 +104,13 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
     ],
     query_field_aliases={
         "LicenceActivities": ["LicenseActivities", "Licence Activities", "License Activities"],
+        "CompanyName": ["Company Name", "Company", "LegalNameEnglish"],
         "IssueDate": ["IssuanceDate"],
         "OfficialEmail": ["Email"],
         "OfficialMobile": ["Mobile", "Phone"],
     },
     validators={
+        "CompanyName": _is_english_text,
         "TradeNameEnglish": _is_english_text,
         "OperatingName": _is_english_text,
         "BusinessName": _is_english_text,
