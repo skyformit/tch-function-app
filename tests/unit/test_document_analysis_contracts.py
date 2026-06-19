@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.domain.document_analysis.profiles import BANK_PROFILE, VAT_PROFILE
+from app.infrastructure.document_qr_extraction import _extract_urls_from_text
 from app.use_cases.document_analysis_extras import build_trade_license_extras, extract_qr_codes
 from app.use_cases.document_analysis import (
     AnalysisOutcome,
@@ -127,7 +128,26 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}},
         )
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
+        self.assertEqual(extras["verification_urls"]["value"], None)
         self.assertNotIn("gpt_review", extras)
+
+    def test_qr_url_fallback_normalizes_www_links(self) -> None:
+        text = "To verify the license visit www.adra.gov.ae for details."
+        self.assertEqual(_extract_urls_from_text(text), ["https://www.adra.gov.ae"])
+
+    @patch("app.use_cases.document_analysis_extras.extract_verification_urls_from_pdf", return_value=["https://www.adra.gov.ae"])
+    def test_trade_license_extras_include_verification_urls(self, mock_urls) -> None:
+        extras = build_trade_license_extras({}, {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}}, file_bytes=b"pdf-bytes")
+        self.assertEqual(extras["verification_urls"]["value"], ["https://www.adra.gov.ae"])
+        self.assertEqual(extras["verification_urls"]["confidence"], 0.95)
+        mock_urls.assert_called_once_with(b"pdf-bytes")
+
+    @patch("app.use_cases.document_analysis_extras.extract_qr_codes_from_pdf", return_value=["https://example.com/qr-from-pdf"])
+    def test_trade_license_extras_fallback_to_pdf_bytes_for_qr(self, mock_qr_from_pdf) -> None:
+        extras = build_trade_license_extras({}, {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}}, file_bytes=b"pdf-bytes")
+        self.assertEqual(extras["qr_codes"]["value"], ["https://example.com/qr-from-pdf"])
+        self.assertEqual(extras["qr_codes"]["confidence"], 0.95)
+        mock_qr_from_pdf.assert_called_once_with(b"pdf-bytes")
 
     @patch("app.use_cases.document_analysis_extras.document_review_openai_endpoint", return_value="https://example.openai.azure.com/")
     @patch("app.use_cases.document_analysis_extras.document_review_openai_api_key", return_value="secret-key")

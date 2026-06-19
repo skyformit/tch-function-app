@@ -9,6 +9,9 @@ azure-ai-contentunderstanding
 azure-identity
 azure-storage-blob
 openai
+numpy
+Pillow
+opencv-python-headless
 python-multipart
 pypdf
 requests

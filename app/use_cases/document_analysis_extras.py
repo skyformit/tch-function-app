@@ -16,6 +16,7 @@ from app.core.document_settings import (
     document_review_openai_deployment_name,
     document_review_openai_endpoint,
 )
+from app.infrastructure.document_qr_extraction import extract_qr_codes_from_pdf, extract_verification_urls_from_pdf
 
 
 def extract_qr_codes(json_data: Any) -> list[str]:
@@ -45,9 +46,16 @@ def _collect_qr_from_barcodes(value: dict, qr_values: list[str]) -> None:
             qr_values.append(decoded_value)
 
 
-def build_qr_codes_result(raw_result: Any) -> dict[str, Any]:
+def build_qr_codes_result(raw_result: Any, file_bytes: bytes | None = None) -> dict[str, Any]:
     qr_codes = extract_qr_codes(raw_result)
+    if not qr_codes and file_bytes:
+        qr_codes = extract_qr_codes_from_pdf(file_bytes)
     return {"value": qr_codes or None, "confidence": 0.95 if qr_codes else 0.0}
+
+
+def build_verification_urls_result(file_bytes: bytes | None = None) -> dict[str, Any]:
+    urls = extract_verification_urls_from_pdf(file_bytes) if file_bytes else []
+    return {"value": urls or None, "confidence": 0.95 if urls else 0.0}
 
 
 def review_with_azure_openai(extracted_fields: dict[str, Any], deployment_name: Optional[str] = None) -> dict[str, Any]:
@@ -101,8 +109,11 @@ def _review_unavailable(reasoning: str) -> dict[str, Any]:
     return {"is_consistent": False, "anomalies": [reasoning], "plausibility_score": 0.0, "reasoning": reasoning, "skipped": True}
 
 
-def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any]) -> dict[str, Any]:
-    extras = {"qr_codes": build_qr_codes_result(raw_result)}
+def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any], file_bytes: bytes | None = None) -> dict[str, Any]:
+    extras = {
+        "qr_codes": build_qr_codes_result(raw_result, file_bytes),
+        "verification_urls": build_verification_urls_result(file_bytes),
+    }
     gpt_review = review_with_azure_openai(extracted_fields)
     if not gpt_review.get("skipped"):
         extras["gpt_review"] = gpt_review

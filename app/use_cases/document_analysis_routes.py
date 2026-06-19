@@ -28,7 +28,7 @@ async def _read_upload(req: Request) -> tuple[Optional[object], bytes, str]:
 def _route_payload(profile: Optional[DocumentAnalysisProfile], is_trade: bool, outcome, file_bytes: bytes, content_type: Optional[str], target_fields: list[str]) -> dict:
     response_payload = build_trade_license_response(outcome, target_fields) if is_trade else build_document_analysis_response(outcome, profile)
     if is_trade:
-        response_payload.update(build_trade_license_extras(outcome.raw_result, response_payload.get("results", {})))
+        response_payload.update(build_trade_license_extras(outcome.raw_result, response_payload.get("results", {}), file_bytes))
     if profile and profile.route_name == "ValidateVAT":
         return _apply_vat_analysis_fallback(response_payload, file_bytes, content_type)
     if profile and profile.route_name == "ValidateBankDocument":
