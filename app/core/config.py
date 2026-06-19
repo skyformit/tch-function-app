@@ -9,9 +9,10 @@ def _env(name: str, default: str = "") -> str:
 @dataclass(frozen=True)
 class Settings:
     foundry_project_endpoint: str = _env("FOUNDRY_PROJECT_ENDPOINT")
-    foundry_agent_name: str = _env("FOUNDRY_AGENT_NAME")
     foundry_token_scope: str = _env("FOUNDRY_TOKEN_SCOPE", "https://ai.azure.com/.default")
     general_chat_agent_id: str = _env("GENERAL_CHAT_AGENT_ID")
+    vendor_approval_workflow_url: str = _env("VENDOR_APPROVAL_WORKFLOW_URL")
+    renewal_vendor_approval_workflow_url: str = _env("RENEWAL_VENDOR_APPROVAL_WORKFLOW_URL")
     source_api_url: str = _env("SOURCE_API_URL")
     source_api_key: str = _env("SOURCE_API_KEY")
     source_api_key_header: str = _env("SOURCE_API_KEY_HEADER", "X-Api-Key")
@@ -57,7 +58,7 @@ def foundry_project_endpoint() -> str:
 
 
 def foundry_agent_name() -> str:
-    return settings.foundry_agent_name
+    return settings.vendor_approval_workflow_url
 
 
 def foundry_token_scope() -> str:
@@ -66,6 +67,14 @@ def foundry_token_scope() -> str:
 
 def general_chat_agent_id() -> str:
     return settings.general_chat_agent_id
+
+
+def vendor_approval_workflow_url() -> str:
+    return settings.vendor_approval_workflow_url
+
+
+def renewal_vendor_approval_workflow_url() -> str:
+    return settings.renewal_vendor_approval_workflow_url
 
 
 def source_api_url() -> str:

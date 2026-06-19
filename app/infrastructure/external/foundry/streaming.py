@@ -3,6 +3,7 @@ from typing import Iterator, Optional
 
 import requests
 
+from app.core.config import vendor_approval_workflow_url
 from app.infrastructure.external.foundry.common import (
     DEFAULT_SCOPE,
     _bearer_token,
@@ -76,9 +77,9 @@ def _open_stream(project_endpoint: str, url: str, headers: dict, conversation_id
 
 def stream_foundry_from_text(input_text: str, conversation_id: Optional[str] = None, include: Optional[list] = None, previous_response_id: Optional[str] = None) -> Iterator[bytes]:
     project_endpoint = (os.getenv("FOUNDRY_PROJECT_ENDPOINT") or "").strip()
-    agent_name = (os.getenv("FOUNDRY_AGENT_NAME") or "").strip()
+    agent_name = (vendor_approval_workflow_url() or "").strip()
     if project_endpoint and not agent_name:
-        yield _sse_frame("error", {"ok": False, "error": {"code": "missing_configuration", "message": "Missing env var: FOUNDRY_AGENT_NAME"}}); return
+        yield _sse_frame("error", {"ok": False, "error": {"code": "missing_configuration", "message": "Missing env var: VENDOR_APPROVAL_WORKFLOW_URL"}}); return
     url = _resolve_stream_url().strip()
     if not url:
         yield _sse_frame("error", {"ok": False, "error": {"code": "missing_configuration", "message": "Missing env var: FOUNDRY_PROJECT_ENDPOINT or FOUNDRY_RESPONSES_URL (or FOUNDRY_PROTOCOL_URL / FOUNDRY_ACTIVITYPROTOCOL_URL)"}}); return

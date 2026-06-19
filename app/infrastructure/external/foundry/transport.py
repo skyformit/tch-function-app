@@ -14,6 +14,7 @@ from app.infrastructure.external.foundry.common import (
     _timeout_seconds,
 )
 from app.infrastructure.external.foundry.payload import _normalize_error_body, _success_payload
+from app.core.config import vendor_approval_workflow_url
 
 
 def _missing_config(message: str) -> tuple[int, dict]:
@@ -22,9 +23,9 @@ def _missing_config(message: str) -> tuple[int, dict]:
 
 def _workflow_url(project_endpoint: Optional[str] = None, agent_name: Optional[str] = None) -> tuple[int, Optional[str]]:
     project_endpoint = (project_endpoint if project_endpoint is not None else os.getenv("FOUNDRY_PROJECT_ENDPOINT") or "").strip()
-    agent_name = (agent_name if agent_name is not None else os.getenv("FOUNDRY_AGENT_NAME") or "").strip()
+    agent_name = (agent_name if agent_name is not None else vendor_approval_workflow_url() or "").strip()
     if project_endpoint and not agent_name:
-        return _missing_config("Missing env var: FOUNDRY_AGENT_NAME")[0], None
+        return _missing_config("Missing env var: VENDOR_APPROVAL_WORKFLOW_URL")[0], None
     if project_endpoint:
         return 200, _project_responses_url(project_endpoint)
     raw_url = os.getenv("FOUNDRY_RESPONSES_URL") or os.getenv("FOUNDRY_PROTOCOL_URL") or os.getenv("FOUNDRY_ACTIVITYPROTOCOL_URL") or ""
@@ -32,7 +33,7 @@ def _workflow_url(project_endpoint: Optional[str] = None, agent_name: Optional[s
 
 
 def _resolve_agent_name(agent_name: Optional[str] = None) -> str:
-    return (agent_name if agent_name is not None else os.getenv("FOUNDRY_AGENT_NAME") or "").strip()
+    return (agent_name if agent_name is not None else vendor_approval_workflow_url() or "").strip()
 
 
 def _resolve_conversation_id(project_endpoint: str, headers: dict) -> tuple[bool, Optional[str], Optional[dict]]:

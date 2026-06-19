@@ -19,6 +19,14 @@ There is also a General Bot route:
 - Uses `GENERAL_CHAT_AGENT_ID`
 - Uses `FOUNDRY_PROJECT_ENDPOINT`
 - Uses `FOUNDRY_TOKEN_SCOPE`
+- If the general chat response includes a trade license expiry date, the app can automatically route to:
+  - `TCG-Vendor-Approval-Workflow` when the license is expired
+  - `Renewal-Vendor-Approval-Workflow` when the license expires within 60 days
+
+Optional workflow URLs:
+
+- `VENDOR_APPROVAL_WORKFLOW_URL`
+- `RENEWAL_VENDOR_APPROVAL_WORKFLOW_URL`
 
 There is also a scheduled poller:
 
@@ -274,7 +282,7 @@ Success returns a `status` of `success` plus the extracted `results` and `score`
 Set these app settings:
 
 - `FOUNDRY_PROJECT_ENDPOINT`
-- `FOUNDRY_AGENT_NAME`
+- `VENDOR_APPROVAL_WORKFLOW_URL`
 - `FOUNDRY_TOKEN_SCOPE`
 - `GENERAL_CHAT_AGENT_ID`
 - `SOURCE_API_URL`
