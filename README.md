@@ -16,8 +16,9 @@ The code is split into:
 There is also a General Bot route:
 
 - `POST /api/invoke-general-bot`
-- Uses `GENERAL_BOT_AGENT_ID` / `AZURE_EXISTING_AGENT_ID`
-- Uses `GENERAL_BOT_PROJECT_ENDPOINT` / `AZURE_EXISTING_AIPROJECT_ENDPOINT`
+- Uses `FOUNDRY_AGENT_NAME`
+- Uses `FOUNDRY_PROJECT_ENDPOINT`
+- Uses `FOUNDRY_TOKEN_SCOPE`
 
 There is also a scheduled poller:
 

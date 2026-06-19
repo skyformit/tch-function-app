@@ -51,6 +51,18 @@ class Settings:
 settings = Settings()
 
 
+def foundry_project_endpoint() -> str:
+    return settings.foundry_project_endpoint
+
+
+def foundry_agent_name() -> str:
+    return settings.foundry_agent_name
+
+
+def foundry_token_scope() -> str:
+    return settings.foundry_token_scope
+
+
 def source_api_url() -> str:
     return settings.source_api_url
 
