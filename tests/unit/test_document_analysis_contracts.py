@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.domain.document_analysis.profiles import BANK_PROFILE, VAT_PROFILE
+from app.use_cases.document_analysis_extras import build_trade_license_extras, extract_qr_codes
 from app.use_cases.document_analysis import (
     AnalysisOutcome,
     _apply_bank_account_name_fallback,
@@ -106,6 +107,51 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         with patch("app.use_cases.document_analysis_fallbacks.extract_bank_account_name_from_pdf", return_value="CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"):
             result = _apply_bank_account_name_fallback(payload, b"pdf-bytes")
         self.assertEqual(result["results"]["AccountName"]["value"], "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC")
+
+    def test_qr_code_extraction_finds_nested_barcodes(self) -> None:
+        raw_result = {
+            "contents": [
+                {
+                    "barcodes": [
+                        {"kind": "qrCode", "value": "https://example.com/qr-1"},
+                        {"kind": "code128", "value": "ignore-me"},
+                    ]
+                }
+            ]
+        }
+        self.assertEqual(extract_qr_codes(raw_result), ["https://example.com/qr-1"])
+
+    def test_trade_license_extras_include_qr_codes(self) -> None:
+        extras = build_trade_license_extras(
+            {"contents": [{"barcodes": [{"kind": "qr", "value": "https://example.com"}]}]},
+            {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}},
+        )
+        self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
+        self.assertNotIn("gpt_review", extras)
+
+    @patch("app.use_cases.document_analysis_extras.document_review_openai_endpoint", return_value="https://example.openai.azure.com/")
+    @patch("app.use_cases.document_analysis_extras.document_review_openai_api_key", return_value="secret-key")
+    @patch("app.use_cases.document_analysis_extras.document_review_openai_api_version", return_value="2025-04-01-preview")
+    @patch("app.use_cases.document_analysis_extras.document_review_openai_deployment_name", return_value="gpt-4o-mini")
+    @patch("app.use_cases.document_analysis_extras.AzureOpenAI")
+    def test_trade_license_extras_include_gpt_review_when_openai_is_available(self, mock_azure_openai, *_patches) -> None:
+        client = mock_azure_openai.return_value
+        client.chat.completions.create.return_value.choices = [
+            type(
+                "Choice",
+                (),
+                {"message": type("Message", (), {"content": '{"is_consistent": true, "anomalies": [], "plausibility_score": 0.98, "reasoning": "Looks consistent."}'})()},
+            )
+        ]
+
+        extras = build_trade_license_extras(
+            {"contents": [{"barcodes": [{"kind": "qr", "value": "https://example.com"}]}]},
+            {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}},
+        )
+
+        self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
+        self.assertEqual(extras["gpt_review"]["is_consistent"], True)
+        self.assertEqual(extras["gpt_review"]["plausibility_score"], 0.98)
 
 
 if __name__ == "__main__":

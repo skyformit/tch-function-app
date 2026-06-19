@@ -11,7 +11,7 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime when provider is selected
     DocumentIntelligenceClient = None
 
-from app.core.config import (
+from app.core.document_settings import (
     document_intelligence_api_version,
     document_intelligence_endpoint,
     document_intelligence_key,

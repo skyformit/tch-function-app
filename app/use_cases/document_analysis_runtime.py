@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from app.core.document_settings import (
+    document_analysis_allow_analyze_without_upload,
+    document_analysis_debug_raw_keys,
+    document_analysis_provider,
+)
 from app.core.storage_config import storage_container
 from app.domain.document_analysis.extraction import extract_fields_with_confidence, score_from_results
 from app.infrastructure.external.content_understanding_client import analyze_document as analyze_with_content_understanding
@@ -28,9 +33,7 @@ class AnalysisOutcome:
 
 
 def _provider() -> str:
-    import os
-
-    raw_value = (os.getenv("DOCUMENT_ANALYSIS_PROVIDER") or DEFAULT_PROVIDER).strip().lower().replace("-", "_")
+    raw_value = (document_analysis_provider() or DEFAULT_PROVIDER).strip().lower().replace("-", "_")
     if raw_value in {"document_intelligence", "document_intelligence_sdk", "di"}:
         return "document_intelligence"
     if raw_value in {"content_understanding", "content_understanding_sdk", "cu"}:
@@ -39,15 +42,11 @@ def _provider() -> str:
 
 
 def _allow_analyze_without_upload() -> bool:
-    import os
-
-    return (os.getenv("DOCUMENT_ANALYSIS_ALLOW_ANALYZE_WITHOUT_UPLOAD") or "").strip().lower() == "true"
+    return document_analysis_allow_analyze_without_upload()
 
 
 def _debug_raw_keys_enabled() -> bool:
-    import os
-
-    return (os.getenv("DOCUMENT_ANALYSIS_DEBUG_RAW_KEYS") or str(DEFAULT_DEBUG_RAW_KEYS)).strip().lower() == "true"
+    return document_analysis_debug_raw_keys()
 
 
 def _collect_field_keys_from_block(raw_result: dict, keys: set[str]) -> None:

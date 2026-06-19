@@ -4,7 +4,7 @@ from azure.ai.contentunderstanding import ContentUnderstandingClient
 from azure.core.credentials import AzureKeyCredential
 from azure.identity import DefaultAzureCredential
 
-from app.core.config import (
+from app.core.document_settings import (
     content_understanding_analyzer_id,
     content_understanding_api_version,
     content_understanding_endpoint,

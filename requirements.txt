@@ -8,6 +8,7 @@ azure-ai-documentintelligence
 azure-ai-contentunderstanding
 azure-identity
 azure-storage-blob
+openai
 python-multipart
 pypdf
 requests

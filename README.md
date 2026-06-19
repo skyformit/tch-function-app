@@ -16,7 +16,7 @@ The code is split into:
 There is also a General Bot route:
 
 - `POST /api/invoke-general-bot`
-- Uses `GENERAL_CHAT_AGENT_ID`
+- Uses `GENERAL_BOT_AGENT_ID`
 - Uses `FOUNDRY_PROJECT_ENDPOINT`
 - Uses `FOUNDRY_TOKEN_SCOPE`
 - If the general chat response includes a trade license expiry date, the app can automatically route to:
@@ -264,6 +264,13 @@ Content Understanding settings:
 - `CONTENT_UNDERSTANDING_ANALYZER_ID`
 - `CONTENT_UNDERSTANDING_TIMEOUT_SECONDS`
 
+Optional trade-license review settings:
+
+- `DOCUMENT_REVIEW_OPENAI_ENDPOINT`
+- `DOCUMENT_REVIEW_OPENAI_API_KEY`
+- `DOCUMENT_REVIEW_OPENAI_API_VERSION`
+- `DOCUMENT_REVIEW_OPENAI_DEPLOYMENT_NAME`
+
 Set `DOCUMENT_ANALYSIS_ALLOW_ANALYZE_WITHOUT_UPLOAD=true` to run local analysis without blob upload.
 Document Intelligence uses `QUERY_FIELDS` with the target field names, so it can extend a prebuilt model like `prebuilt-layout` without a custom-trained model.
 Use `DOCUMENT_ANALYSIS_PROVIDER=content_understanding` when you want the same route to call Content Understanding instead of Document Intelligence.
@@ -284,7 +291,7 @@ Set these app settings:
 - `FOUNDRY_PROJECT_ENDPOINT`
 - `VENDOR_APPROVAL_WORKFLOW_URL`
 - `FOUNDRY_TOKEN_SCOPE`
-- `GENERAL_CHAT_AGENT_ID`
+- `GENERAL_BOT_AGENT_ID`
 - `SOURCE_API_URL`
 - `SOURCE_API_KEY`
 - `SOURCE_API_KEY_HEADER`
