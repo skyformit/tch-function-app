@@ -12,13 +12,14 @@ class LookupRoutingPromptTest(unittest.TestCase):
         self.assertIn("vendor name Abdul Jaleel Al Saadi Trading LLC", LOOKUP_ROUTING_PROMPT)
         self.assertIn("my number is 206558", LOOKUP_ROUTING_PROMPT)
 
-    def test_tbms_without_identifiers_downgrades_to_clarify(self) -> None:
+    def test_tbms_without_identifiers_uses_numeric_license(self) -> None:
         decision = _validate_decision(
             {"route": "tbms", "lookup_type": "unknown", "vendor_name": "", "license_no": "", "confidence": 0.9, "reason": "lookup"},
             "my number is 206558",
         )
-        self.assertEqual(decision["route"], "clarify")
-        self.assertEqual(decision["lookup_type"], "unknown")
+        self.assertEqual(decision["route"], "tbms")
+        self.assertEqual(decision["lookup_type"], "trade_license_number")
+        self.assertEqual(decision["license_no"], "206558")
 
     def test_clarify_with_identifiers_upgrades_to_tbms(self) -> None:
         decision = _validate_decision(
@@ -27,6 +28,15 @@ class LookupRoutingPromptTest(unittest.TestCase):
         )
         self.assertEqual(decision["route"], "tbms")
         self.assertEqual(decision["vendor_name"], "Abdul Jaleel Al Saadi Trading LLC")
+
+    def test_clarify_with_numeric_identifier_upgrades_to_tbms(self) -> None:
+        decision = _validate_decision(
+            {"route": "clarify", "lookup_type": "unknown", "vendor_name": "", "license_no": "", "confidence": 0.4, "reason": "unclear"},
+            "my number is 206558",
+        )
+        self.assertEqual(decision["route"], "tbms")
+        self.assertEqual(decision["lookup_type"], "trade_license_number")
+        self.assertEqual(decision["license_no"], "206558")
 
 
 if __name__ == "__main__":

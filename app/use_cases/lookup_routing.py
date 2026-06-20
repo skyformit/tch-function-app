@@ -38,11 +38,12 @@ Examples:
 - "my trade license number is 206558" -> {"route":"tbms","lookup_type":"trade_license_number","vendor_name":"","license_no":"206558"}
 - "vendor name Abdul Jaleel Al Saadi Trading LLC" -> {"route":"tbms","lookup_type":"company_name","vendor_name":"Abdul Jaleel Al Saadi Trading LLC","license_no":""}
 - "Abdul Jaleel Al Saadi Trading LLC 206558" -> {"route":"tbms","lookup_type":"company_name","vendor_name":"Abdul Jaleel Al Saadi Trading LLC","license_no":"206558"}
-- "my number is 206558" -> clarify unless the model is confident it is a lookup number
+- "my number is 206558" -> tbms if the number looks like a license value
 - "who are you" -> chat
 """
 
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
+_NUMERIC_LICENSE_PATTERN = re.compile(r"\b([A-Z]{1,5}-\d{3,}(?:\s+\d{3,})*|\d{4,}(?:\s+\d{3,})*)\b", re.IGNORECASE)
 
 
 def _normalize_text(value: Any) -> str:
@@ -92,12 +93,27 @@ def _normalize_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
     }
 
 
+def _extract_license_candidate(text: str) -> str:
+    match = _NUMERIC_LICENSE_PATTERN.search(text or "")
+    return match.group(1).strip() if match else ""
+
+
 def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
     route = decision.get("route")
     vendor_name = _normalize_text(decision.get("vendor_name"))
     license_no = _normalize_text(decision.get("license_no"))
     confidence = decision.get("confidence", 0.0)
+    license_candidate = _extract_license_candidate(text)
     if route == "tbms" and not vendor_name and not license_no:
+        if license_candidate:
+            return {
+                "route": "tbms",
+                "lookup_type": "trade_license_number",
+                "vendor_name": "",
+                "license_no": license_candidate,
+                "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
+                "reason": "The model chose TBMS and the message contains a license-like number.",
+            }
         return {
             "route": "clarify",
             "lookup_type": "unknown",
@@ -120,6 +136,15 @@ def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
             **decision,
             "route": "tbms",
             "reason": "The model marked the request as unclear but still extracted lookup identifiers.",
+        }
+    if route == "clarify" and license_candidate:
+        return {
+            "route": "tbms",
+            "lookup_type": "trade_license_number",
+            "vendor_name": vendor_name,
+            "license_no": license_candidate,
+            "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
+            "reason": "The message contains a numeric identifier that can be treated as a license number.",
         }
     return decision
 
