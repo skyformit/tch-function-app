@@ -28,10 +28,18 @@ Return only valid JSON with this shape:
 Rules:
 - Prefer tbms for explicit vendor/company/company name/business name/trade name/legal name inputs.
 - Prefer tbms for explicit trade license/license no/license number/licence no inputs.
+- Prefer tbms when the message contains a clear UAE vendor lookup intent plus a numeric license value, even if the wording is informal.
 - If both company name and license number are present, extract both.
 - Use clarify only when the user clearly wants a lookup but the input is incomplete or ambiguous.
 - Use chat for greetings, identity questions, capability questions, and all unrelated conversations.
 - Do not invent company names or license numbers.
+
+Examples:
+- "my trade license number is 206558" -> {"route":"tbms","lookup_type":"trade_license_number","vendor_name":"","license_no":"206558"}
+- "vendor name Abdul Jaleel Al Saadi Trading LLC" -> {"route":"tbms","lookup_type":"company_name","vendor_name":"Abdul Jaleel Al Saadi Trading LLC","license_no":""}
+- "Abdul Jaleel Al Saadi Trading LLC 206558" -> {"route":"tbms","lookup_type":"company_name","vendor_name":"Abdul Jaleel Al Saadi Trading LLC","license_no":"206558"}
+- "my number is 206558" -> clarify unless the model is confident it is a lookup number
+- "who are you" -> chat
 """
 
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
@@ -84,6 +92,38 @@ def _normalize_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
     }
 
 
+def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
+    route = decision.get("route")
+    vendor_name = _normalize_text(decision.get("vendor_name"))
+    license_no = _normalize_text(decision.get("license_no"))
+    confidence = decision.get("confidence", 0.0)
+    if route == "tbms" and not vendor_name and not license_no:
+        return {
+            "route": "clarify",
+            "lookup_type": "unknown",
+            "vendor_name": "",
+            "license_no": "",
+            "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
+            "reason": "The model chose TBMS but did not provide a vendor name or license number.",
+        }
+    if route == "tbms" and confidence < 0.4 and not vendor_name and not license_no:
+        return {
+            "route": "clarify",
+            "lookup_type": "unknown",
+            "vendor_name": "",
+            "license_no": "",
+            "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
+            "reason": "The model output is too weak to call TBMS safely.",
+        }
+    if route == "clarify" and (vendor_name or license_no):
+        return {
+            **decision,
+            "route": "tbms",
+            "reason": "The model marked the request as unclear but still extracted lookup identifiers.",
+        }
+    return decision
+
+
 def _build_prompt(text: str) -> str:
     return f"{LOOKUP_ROUTING_PROMPT}\n\nUser message:\n{text.strip()}"
 
@@ -121,7 +161,8 @@ async def classify_lookup_route(text: str, config: dict) -> dict[str, Any]:
             "confidence": 0.0,
             "reason": "The LLM did not return a valid JSON routing decision.",
         }
-    return _normalize_decision(decision, text)
+    normalized = _normalize_decision(decision, text)
+    return _validate_decision(normalized, text)
 
 
 def build_lookup_payloads(decision: dict[str, Any]) -> list[dict]:
