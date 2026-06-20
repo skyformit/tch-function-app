@@ -1,8 +1,6 @@
 import asyncio
 import json
 from functools import partial
-import re
-from typing import Optional, Tuple
 
 from azurefunctions.extensions.http.fastapi import Request
 
@@ -11,110 +9,9 @@ from app.infrastructure.external.foundry.activity_workflow import invoke_activit
 from app.infrastructure.external.foundry.common import _with_response_metadata
 from app.infrastructure.external.foundry_client import _json_response, invoke_foundry_from_text
 from app.use_cases.foundry_workflow import _body_text, _conversation_id, _json_body
-from app.use_cases.lookup_classifier import classify_lookup_input
+from app.use_cases.lookup_routing import build_lookup_payloads, classify_lookup_route
 from app.use_cases.tbms.transport import _call_tbms_api
 from app.use_cases.trade_license_routing import classify_trade_license_routing
-
-_GREETINGS = (
-    "hi",
-    "hi there",
-    "hey",
-    "hey there",
-    "hello",
-    "hello there",
-    "good day",
-    "good morning",
-    "good morning team",
-    "good morning everyone",
-    "good afternoon",
-    "good afternoon team",
-    "good afternoon everyone",
-    "good evening",
-    "good evening team",
-    "good evening everyone",
-    "morning",
-    "afternoon",
-    "evening",
-)
-
-_STATUS_PHI = (
-    "how are you",
-    "how are you today",
-    "how do you do",
-)
-
-_IDENTITY_PHRASES = (
-    "who are you",
-    "what are you",
-    "what is your name",
-    "tell me about yourself",
-    "tell me who you are",
-    "are you a bot",
-    "are you human",
-)
-
-_CAPABILITY_PHRASES = (
-    "what can you do",
-    "what do you do",
-    "how can you help",
-    "how can you help me",
-    "can you help me",
-    "help",
-    "i need help",
-    "need help",
-    "what services do you offer",
-    "what services can you offer",
-)
-
-_THANKS_PHRASES = (
-    "thanks",
-    "thank you",
-    "thank you so much",
-    "much appreciated",
-)
-
-_FAREWELL_PHRASES = (
-    "bye",
-    "goodbye",
-    "see you",
-    "see you later",
-    "see you soon",
-)
-
-_AFFIRMATION_PHRASES = (
-    "ok",
-    "okay",
-    "sure",
-)
-
-
-def _build_phrase_response_map() -> dict[str, str]:
-    responses: dict[str, str] = {}
-    greetings = "Hello, how can I help you with vendor lookup, trade license, VAT, or document upload?"
-    status = "I’m here to help with vendor lookup, trade license, VAT, and document workflows."
-    identity = "I’m your UAE Business Compliance Assistant for vendor lookup, trade license, VAT, and document workflows."
-    capabilities = "I can help with vendor lookup, trade license checks, VAT, document uploads, and workflow routing."
-    thanks = "You’re welcome. How can I help further?"
-    farewell = "Goodbye. Reach out anytime you need help with compliance or vendor workflows."
-
-    for phrase in _GREETINGS:
-        responses[phrase] = greetings
-    for phrase in _STATUS_PHI:
-        responses[phrase] = status
-    for phrase in _IDENTITY_PHRASES:
-        responses[phrase] = identity
-    for phrase in _CAPABILITY_PHRASES:
-        responses[phrase] = capabilities
-    for phrase in _THANKS_PHRASES:
-        responses[phrase] = thanks
-    for phrase in _FAREWELL_PHRASES:
-        responses[phrase] = farewell
-    for phrase in _AFFIRMATION_PHRASES:
-        responses[phrase] = greetings
-    return responses
-
-
-SMALL_TALK_RESPONSES = _build_phrase_response_map()
 
 
 def _missing_configuration_response(name: str):
@@ -129,186 +26,6 @@ def _validate_body(body: dict):
     if activity is None and not input_text:
         return "bad_request", "Provide JSON with 'input', 'text', or 'activity'"
     return "", ""
-
-
-def _normalize_small_talk_text(text: str) -> str:
-    normalized_text = (text or "").strip().lower()
-    normalized_text = re.sub(r"[^\w\u0600-\u06FF\s]+", " ", normalized_text)
-    return " ".join(normalized_text.split())
-
-
-def _has_business_intent(text: str) -> bool:
-    normalized_text = _normalize_small_talk_text(text)
-    if not normalized_text:
-        return False
-    keywords = (
-        "vendor",
-        "vendor name",
-        "company",
-        "company name",
-        "business",
-        "business name",
-        "trade name",
-        "license",
-        "licence",
-        "trade",
-        "trading",
-        "llc",
-        "fze",
-        "fzco",
-        "ltd",
-        "vat",
-        "tax",
-        "trn",
-        "lookup",
-        "search",
-        "status",
-        "renewal",
-        "renew",
-        "approval",
-        "document",
-        "upload",
-        "bank",
-        "workflow",
-        "workflow",
-        "tbms",
-    )
-    return any(keyword in normalized_text for keyword in keywords)
-
-
-def _small_talk_response(text: str, body: dict):
-    normalized_text = _normalize_small_talk_text(text)
-    if _has_business_intent(text):
-        return None
-    message = SMALL_TALK_RESPONSES.get(normalized_text)
-    if message is None:
-        return None
-    return _json_response(
-        _with_response_metadata(
-            {
-                "ok": True,
-                "status": "completed",
-                "response_type": "small_talk",
-                "text": message,
-                "conversation_id": _conversation_id(body),
-            },
-            "backend",
-        ),
-        status_code=200,
-    )
-
-
-def _lookup_request_payload(classification: dict, text: str) -> Optional[dict]:
-    label = (classification.get("label") or "").strip()
-    if label == "company_name":
-        return {"vendorName": text.strip(), "vendId": -1, "licenseNo": "", "email": "", "statusId": -1}
-    if label == "trade_license_number":
-        return {"vendorName": "", "vendId": -1, "licenseNo": text.strip(), "email": "", "statusId": -1}
-    return None
-
-
-def _strip_leading_greeting(text: str) -> str:
-    original_text = (text or "").strip()
-    normalized_text = _normalize_small_talk_text(original_text)
-    greeting_prefixes = (
-        "hello there",
-        "good morning everyone",
-        "good morning team",
-        "good morning",
-        "good afternoon everyone",
-        "good afternoon team",
-        "good afternoon",
-        "good evening everyone",
-        "good evening team",
-        "good evening",
-        "good day",
-        "hi there",
-        "hey there",
-        "hello",
-        "hey",
-        "morning",
-        "afternoon",
-        "evening",
-        "hi",
-        "ok",
-        "okay",
-        "sure",
-        "thanks",
-        "thank you so much",
-        "thank you",
-    )
-    for prefix in greeting_prefixes:
-        if normalized_text == prefix:
-            return ""
-        pattern = rf"^\s*{re.escape(prefix)}[\s,!.;:-]*"
-        if re.match(pattern, original_text, flags=re.IGNORECASE):
-            return re.sub(pattern, "", original_text, count=1, flags=re.IGNORECASE).strip()
-    return original_text
-
-
-def _extract_license_number(text: str) -> Optional[str]:
-    patterns = [
-        r"\b(?:trade\s*)?(?:licen[cs]e|licence)(?:\s*(?:no\.?|number))?\s*[:\-]?\s*([A-Z]{1,5}-\d{3,}(?:\s+\d{3,})*)\b",
-        r"\b(?:trade\s*)?(?:licen[cs]e|licence)(?:\s*(?:no\.?|number))?\s*[:\-]?\s*(\d{3,}(?:\s+\d{3,})+)\b",
-        r"\b(?:trade\s*)?(?:licen[cs]e|licence)(?:\s*(?:no\.?|number))?\s*[:\-]?\s*(\d{4,})\b",
-        r"\b([A-Z]{1,5}-\d{3,}(?:\s+\d{3,})*)\b",
-        r"\b(\d{3,}(?:\s+\d{3,})+)\b",
-        r"\b(\d{5,})\b",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text or "", flags=re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-    return None
-
-
-def _remove_license_from_text(text: str, license_number: str) -> str:
-    cleaned_text = (text or "").strip()
-    if not license_number:
-        return cleaned_text
-    pattern = re.escape(license_number)
-    cleaned_text = re.sub(pattern, " ", cleaned_text, count=1, flags=re.IGNORECASE)
-    return " ".join(cleaned_text.split())
-
-
-def _extract_company_from_text(text: str) -> Optional[str]:
-    normalized_text = " ".join((text or "").strip().split())
-    if not normalized_text:
-        return None
-    patterns = (
-        r"\b(?:vendor\s*name|company\s*name|company|vendor)\b\s*[:\-]?\s*(.+)$",
-        r"\b(?:business\s*name|trade\s*name|legal\s*name)\b\s*[:\-]?\s*(.+)$",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, normalized_text, flags=re.IGNORECASE)
-        if match:
-            candidate = match.group(1).strip()
-            candidate = re.split(r"\b(?:license|licen[cs]e|licence|trade\s*license|trn)\b", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,;:-")
-            if candidate:
-                return " ".join(candidate.split())
-    return None
-
-
-def _strip_license_labels(text: str) -> str:
-    cleaned_text = re.sub(
-        r"\b(?:trade\s*)?(?:licen[cs]e|licence)(?:\s*(?:no\.?|number))?\b",
-        " ",
-        text or "",
-        flags=re.IGNORECASE,
-    )
-    return " ".join(cleaned_text.split())
-
-
-def _split_lookup_text(text: str) -> Tuple[str, Optional[str]]:
-    without_greeting = _strip_leading_greeting(text)
-    license_number = _extract_license_number(without_greeting)
-    company_text = _extract_company_from_text(without_greeting)
-    if not company_text:
-        company_text = _remove_license_from_text(without_greeting, license_number) if license_number else without_greeting
-        company_text = _strip_license_labels(company_text)
-        if not company_text or not re.search(r"[A-Za-z]", company_text) or not _has_business_intent(company_text):
-            company_text = ""
-    return company_text.strip(), license_number
 
 
 def _tbms_response_has_results(payload: dict) -> bool:
@@ -379,14 +96,14 @@ def _annotate_source(payload: dict, source: str) -> dict:
     return _with_response_metadata(payload, source)
 
 
-async def _lookup_response(text: str):
-    classification = classify_lookup_input(text)
-    label = classification.get("label")
-    if label == "person_name":
+async def _lookup_response(text: str, config: dict):
+    decision = await classify_lookup_route(text, config)
+    if decision.get("route") == "clarify":
         return _lookup_clarification_response()
-    company_text, license_number = _split_lookup_text(text)
-    payloads = _lookup_payloads(label, company_text, license_number)
+    payloads = build_lookup_payloads(decision)
     if not payloads:
+        if decision.get("route") == "tbms":
+            return _lookup_clarification_response()
         return None
     last_payload = None
     last_response = None
@@ -403,21 +120,6 @@ async def _lookup_response(text: str):
     if isinstance(fallback_payload, dict):
         fallback_payload.setdefault("lookup_attempt", last_payload)
     return _json_response(_annotate_source(fallback_payload, "tbms"), status_code=last_response.status_code)
-
-
-def _lookup_payloads(label: str, company_text: str, license_number: Optional[str]) -> list[dict]:
-    payloads: list[dict] = []
-    if label in {"company_name", "trade_license_number"} and license_number and company_text:
-        payloads.append({"vendorName": company_text, "vendId": -1, "licenseNo": license_number, "email": "", "statusId": -1})
-        payloads.append({"vendorName": "", "vendId": -1, "licenseNo": license_number, "email": "", "statusId": -1})
-        payloads.append({"vendorName": company_text, "vendId": -1, "licenseNo": "", "email": "", "statusId": -1})
-        return payloads
-    if label == "trade_license_number":
-        payloads.append({"vendorName": "", "vendId": -1, "licenseNo": license_number or company_text, "email": "", "statusId": -1})
-        return payloads
-    if label == "company_name":
-        payloads.append({"vendorName": company_text, "vendId": -1, "licenseNo": "", "email": "", "statusId": -1})
-    return payloads
 
 
 def _resolve_config():
@@ -506,15 +208,12 @@ async def invoke_general_bot(req: Request):
     error_code, error_message = _validate_body(body)
     if error_code:
         return _json_response({"ok": False, "error": {"code": error_code, "message": error_message}}, status_code=400)
-    small_talk_response = _small_talk_response(_body_text(body), body)
-    if small_talk_response is not None:
-        return small_talk_response
-    lookup_response = await _lookup_response(_body_text(body))
-    if lookup_response is not None:
-        return lookup_response
     config, config_error = _resolve_config()
     if config_error is not None:
         return config_error
+    lookup_response = await _lookup_response(_body_text(body), config)
+    if lookup_response is not None:
+        return lookup_response
     status_code, payload = await _invoke_general_bot_workflow(body, config)
     payload = _annotate_source(payload, "llm")
     status_code, payload = _route_trade_license(payload, body)

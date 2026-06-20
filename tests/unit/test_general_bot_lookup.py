@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
-from app.use_cases.general_bot import invoke_general_bot, _split_lookup_text
+from app.use_cases.general_bot import invoke_general_bot
 from app.use_cases.trade_license_expiry import TradeLicenseExpiryDecision
 from app.use_cases.trade_license_routing import TradeLicenseWorkflowRoute
 
@@ -36,7 +36,10 @@ class GeneralBotLookupTest(unittest.TestCase):
     def test_non_lookup_text_returns_llm_source(self) -> None:
         request = _FakeRequest({"text": "Please summarize the latest vendor changes."})
 
-        with patch("app.use_cases.general_bot._lookup_response", return_value=None), patch(
+        with patch(
+            "app.use_cases.general_bot.classify_lookup_route",
+            return_value={"route": "chat", "lookup_type": "unknown", "vendor_name": "", "license_no": "", "confidence": 0.92, "reason": "General chat."},
+        ), patch(
             "app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)
         ), patch("app.use_cases.general_bot._invoke_general_bot_workflow", new=AsyncMock(return_value=(200, {"ok": True, "text": "LLM answer"}))):
             response = asyncio.run(invoke_general_bot(request))
@@ -51,7 +54,12 @@ class GeneralBotLookupTest(unittest.TestCase):
         request = _FakeRequest({"text": "Abdul Jaleel Al Saadi Trading LLC"})
 
         fake_tbms_response = _FakeTbmsResponse({"ok": True, "data": {"results": []}, "status_code": 200})
-        with patch("app.use_cases.general_bot._call_tbms_api", return_value=fake_tbms_response) as call_tbms, patch(
+        with patch(
+            "app.use_cases.general_bot.classify_lookup_route",
+            return_value={"route": "tbms", "lookup_type": "company_name", "vendor_name": "Abdul Jaleel Al Saadi Trading LLC", "license_no": "", "confidence": 0.98, "reason": "Company lookup."},
+        ), patch("app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)), patch(
+            "app.use_cases.general_bot._call_tbms_api", return_value=fake_tbms_response
+        ) as call_tbms, patch(
             "app.use_cases.general_bot._invoke_general_bot_workflow", new=AsyncMock()
         ) as invoke_workflow:
             response = asyncio.run(invoke_general_bot(request))
@@ -74,7 +82,12 @@ class GeneralBotLookupTest(unittest.TestCase):
             _FakeTbmsResponse({"ok": True, "data": {"results": [{"vendorName": "Abdul Jaleel Al Saadi Trading LLC"}]}, "status_code": 200}),
         ]
 
-        with patch("app.use_cases.general_bot._call_tbms_api", side_effect=responses) as call_tbms:
+        with patch(
+            "app.use_cases.general_bot.classify_lookup_route",
+            return_value={"route": "tbms", "lookup_type": "company_name", "vendor_name": "Abdul Jaleel Al Saadi Trading LLC", "license_no": "526422", "confidence": 0.98, "reason": "Company and license lookup."},
+        ), patch("app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)), patch(
+            "app.use_cases.general_bot._call_tbms_api", side_effect=responses
+        ) as call_tbms:
             response = asyncio.run(invoke_general_bot(request))
 
         self.assertEqual(call_tbms.call_count, 2)
@@ -91,35 +104,16 @@ class GeneralBotLookupTest(unittest.TestCase):
         self.assertEqual(payload["origin"], "tbms")
         self.assertEqual(payload["source_type"], "tbms")
 
-    def test_labeled_company_and_license_are_split_correctly(self) -> None:
-        company_text, license_number = _split_lookup_text("my license is 526422 and company Abdul Jaleel Al Saadi Trading LLC")
-
-        self.assertEqual(company_text, "Abdul Jaleel Al Saadi Trading LLC")
-        self.assertEqual(license_number, "526422")
-
-    def test_alphanumeric_license_and_company_are_split_correctly(self) -> None:
-        company_text, license_number = _split_lookup_text("Abdul Jaleel Al Saadi Trading LLC CN-1067688")
-
-        self.assertEqual(company_text, "Abdul Jaleel Al Saadi Trading LLC")
-        self.assertEqual(license_number, "CN-1067688")
-
-    def test_trade_license_label_only_returns_license_without_company(self) -> None:
-        company_text, license_number = _split_lookup_text("trade license no 526422")
-
-        self.assertEqual(company_text, "")
-        self.assertEqual(license_number, "526422")
-
-    def test_vendor_name_label_only_returns_company_without_license(self) -> None:
-        company_text, license_number = _split_lookup_text("vendor name Abdul Jaleel Al Saadi Trading LLC")
-
-        self.assertEqual(company_text, "Abdul Jaleel Al Saadi Trading LLC")
-        self.assertIsNone(license_number)
-
     def test_trade_license_number_goes_to_tbms_lookup(self) -> None:
         request = _FakeRequest({"text": "526422"})
 
         fake_tbms_response = _FakeTbmsResponse({"ok": True, "data": {"results": []}, "status_code": 200})
-        with patch("app.use_cases.general_bot._call_tbms_api", return_value=fake_tbms_response) as call_tbms:
+        with patch(
+            "app.use_cases.general_bot.classify_lookup_route",
+            return_value={"route": "tbms", "lookup_type": "trade_license_number", "vendor_name": "", "license_no": "526422", "confidence": 0.99, "reason": "License lookup."},
+        ), patch("app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)), patch(
+            "app.use_cases.general_bot._call_tbms_api", return_value=fake_tbms_response
+        ) as call_tbms:
             response = asyncio.run(invoke_general_bot(request))
 
         call_tbms.assert_called_once()
@@ -130,7 +124,10 @@ class GeneralBotLookupTest(unittest.TestCase):
     def test_non_business_year_question_does_not_go_to_tbms(self) -> None:
         request = _FakeRequest({"text": "who win world cup cricket 1983"})
 
-        with patch("app.use_cases.general_bot._call_tbms_api") as call_tbms, patch(
+        with patch(
+            "app.use_cases.general_bot.classify_lookup_route",
+            return_value={"route": "chat", "lookup_type": "unknown", "vendor_name": "", "license_no": "", "confidence": 0.88, "reason": "General chat."},
+        ), patch("app.use_cases.general_bot._call_tbms_api") as call_tbms, patch(
             "app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)
         ), patch("app.use_cases.general_bot._invoke_general_bot_workflow", new=AsyncMock(return_value=(200, {"ok": True, "text": "LLM answer"}))) as invoke_workflow:
             response = asyncio.run(invoke_general_bot(request))
@@ -153,7 +150,12 @@ class GeneralBotLookupTest(unittest.TestCase):
         request = _FakeRequest({"text": "hello Abdul Jaleel Al Saadi Trading LLC"})
 
         fake_tbms_response = _FakeTbmsResponse({"ok": True, "data": {"results": [{"vendorName": "Abdul Jaleel Al Saadi Trading LLC"}]}, "status_code": 200})
-        with patch("app.use_cases.general_bot._call_tbms_api", return_value=fake_tbms_response) as call_tbms:
+        with patch(
+            "app.use_cases.general_bot.classify_lookup_route",
+            return_value={"route": "tbms", "lookup_type": "company_name", "vendor_name": "Abdul Jaleel Al Saadi Trading LLC", "license_no": "", "confidence": 0.98, "reason": "Company lookup."},
+        ), patch("app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)), patch(
+            "app.use_cases.general_bot._call_tbms_api", return_value=fake_tbms_response
+        ) as call_tbms:
             response = asyncio.run(invoke_general_bot(request))
 
         call_tbms.assert_called_once()
@@ -167,11 +169,16 @@ class GeneralBotLookupTest(unittest.TestCase):
     def test_person_name_requests_clarification(self) -> None:
         request = _FakeRequest({"text": "Abdul Jaleel Al Saadi"})
 
-        with patch("app.use_cases.general_bot._call_tbms_api") as call_tbms, patch("app.use_cases.general_bot._resolve_config") as resolve_config:
+        with patch("app.use_cases.general_bot.classify_lookup_route", return_value={"route": "clarify", "lookup_type": "person_name", "vendor_name": "", "license_no": "", "confidence": 0.91, "reason": "Looks like a person name."}), patch(
+            "app.use_cases.general_bot._call_tbms_api"
+        ) as call_tbms, patch(
+            "app.use_cases.general_bot._resolve_config",
+            return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None),
+        ) as resolve_config:
             response = asyncio.run(invoke_general_bot(request))
 
         call_tbms.assert_not_called()
-        resolve_config.assert_not_called()
+        resolve_config.assert_called_once()
         self.assertEqual(response.status_code, 200)
         payload = json.loads((getattr(response, "body", None) or response.get_body()).decode())
         self.assertEqual(payload["source"], "backend")
@@ -183,7 +190,7 @@ class GeneralBotLookupTest(unittest.TestCase):
     def test_trade_license_routing_sets_workflow_source(self) -> None:
         request = _FakeRequest({"text": "my trade license is 526422"})
 
-        with patch("app.use_cases.general_bot._lookup_response", return_value=None), patch(
+        with patch("app.use_cases.general_bot.classify_lookup_route", return_value={"route": "chat", "lookup_type": "unknown", "vendor_name": "", "license_no": "", "confidence": 0.5, "reason": "General chat."}), patch(
             "app.use_cases.general_bot._resolve_config", return_value=({"project_endpoint": "https://example", "agent_id": "agent", "token_scope": "scope"}, None)
         ), patch("app.use_cases.general_bot._invoke_general_bot_workflow", new=AsyncMock(return_value=(200, {"ok": True, "text": "Trade License Expiry Date: 14 May 2017"}))), patch(
             "app.use_cases.general_bot.classify_trade_license_routing",
