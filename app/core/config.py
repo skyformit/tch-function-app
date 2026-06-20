@@ -22,6 +22,7 @@ class Settings:
     source_state_blob_name: str = _env("SOURCE_STATE_BLOB_NAME")
     source_state_mode: str = _env("SOURCE_STATE_MODE", "memory")
     source_api_timeout_seconds: str = _env("SOURCE_API_TIMEOUT_SECONDS", "5")
+    enable_tbms_lookup: str = _env("ENABLE_TBMS_LOOKUP", "false")
     validate_login_url: str = _env("VALIDATE_LOGIN_URL")
     validate_login_api_key: str = _env("VALIDATE_LOGIN_API_KEY")
     validate_login_api_key_header: str = _env("VALIDATE_LOGIN_API_KEY_HEADER", "x-api-key")
@@ -98,6 +99,10 @@ def source_api_timeout_seconds() -> float:
         return max(1.0, float(settings.source_api_timeout_seconds))
     except ValueError:
         return 5.0
+
+
+def enable_tbms_lookup() -> bool:
+    return settings.enable_tbms_lookup.lower() in {"1", "true", "yes", "on"}
 
 def validate_login_url() -> str:
     return settings.validate_login_url

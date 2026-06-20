@@ -4,7 +4,7 @@ from functools import partial
 
 from azurefunctions.extensions.http.fastapi import Request
 
-from app.core.config import foundry_project_endpoint, foundry_token_scope, general_bot_agent_id
+from app.core.config import enable_tbms_lookup, foundry_project_endpoint, foundry_token_scope, general_bot_agent_id
 from app.infrastructure.external.foundry.activity_workflow import invoke_activity_workflow
 from app.infrastructure.external.foundry.common import _with_response_metadata
 from app.infrastructure.external.foundry_client import _json_response, invoke_foundry_from_text
@@ -97,6 +97,8 @@ def _annotate_source(payload: dict, source: str) -> dict:
 
 
 async def _lookup_response(text: str, config: dict):
+    if not enable_tbms_lookup():
+        return None
     decision = await classify_lookup_route(text, config)
     if decision.get("route") == "clarify":
         return _lookup_clarification_response()
