@@ -7,13 +7,12 @@ from app.core.config import (
     validate_login_api_key,
     validate_login_api_key_header,
     validate_login_password,
-    validate_login_timeout_seconds,
+    source_api_timeout_seconds,
     validate_login_url,
     validate_login_username,
 )
 from app.infrastructure.external.trojan_api_client import post_json_with_retry
 from app.use_cases.tbms.common import (
-    DEFAULT_RETRY_ATTEMPTS,
     DEFAULT_RETRY_SLEEP_SECONDS,
     _TOKEN_CACHE,
     _tbms_token_cache_seconds,
@@ -93,9 +92,9 @@ def _prepare_login_request(login_url: str, verify_ssl: bool, api_key: str, usern
         login_url,
         headers={validate_login_api_key_header(): api_key, "Content-Type": "application/json", "Accept": "application/json"},
         json_payload={"userName": username, "password": password},
-        timeout=validate_login_timeout_seconds(),
+        timeout=source_api_timeout_seconds(),
         verify=verify_ssl,
-        retry_attempts=DEFAULT_RETRY_ATTEMPTS,
+        retry_attempts=1,
         retry_sleep_seconds=DEFAULT_RETRY_SLEEP_SECONDS,
     )
 

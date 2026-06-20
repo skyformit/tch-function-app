@@ -4,7 +4,8 @@ import requests
 from azure.functions import HttpResponse
 
 from app.infrastructure.external.trojan_api_client import post_json_with_retry
-from app.use_cases.tbms.common import DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_SLEEP_SECONDS, _should_retry_response, _tbms_headers, _tbms_timeout_seconds, _tbms_url, _tbms_verify_ssl
+from app.core.config import source_api_timeout_seconds
+from app.use_cases.tbms.common import DEFAULT_RETRY_SLEEP_SECONDS, _tbms_headers, _tbms_url, _tbms_verify_ssl
 from app.use_cases.tbms.login import _bearer_token
 from core.foundry import _json_response
 
@@ -32,9 +33,9 @@ def _tbms_request(token: str, endpoint_path: str, payload: dict | None, params: 
         headers=_tbms_headers(token),
         params=params or None,
         json_payload=payload or {},
-        timeout=_tbms_timeout_seconds(),
+        timeout=source_api_timeout_seconds(),
         verify=_tbms_verify_ssl(),
-        retry_attempts=DEFAULT_RETRY_ATTEMPTS,
+        retry_attempts=1,
         retry_sleep_seconds=DEFAULT_RETRY_SLEEP_SECONDS,
     )
 

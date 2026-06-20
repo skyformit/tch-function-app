@@ -27,13 +27,11 @@ class Settings:
     validate_login_api_key_header: str = _env("VALIDATE_LOGIN_API_KEY_HEADER", "x-api-key")
     validate_login_username: str = _env("VALIDATE_LOGIN_USERNAME")
     validate_login_password: str = _env("VALIDATE_LOGIN_PASSWORD")
-    validate_login_timeout_seconds: str = _env("VALIDATE_LOGIN_TIMEOUT_SECONDS", "30")
     validate_login_verify_ssl: str = _env("VALIDATE_LOGIN_VERIFY_SSL", "true")
     azure_storage_account_url: str = _env("AZURE_STORAGE_ACCOUNT_URL")
     azure_storage_container: str = _env("AZURE_STORAGE_CONTAINER")
     azure_storage_prefix: str = _env("AZURE_STORAGE_PREFIX")
     azure_storage_connection_string: str = _env("AZURE_STORAGE_CONNECTION_STRING")
-    azure_storage_timeout_seconds: str = _env("AZURE_STORAGE_TIMEOUT_SECONDS", "60")
 
 
 settings = Settings()
@@ -101,9 +99,6 @@ def source_api_timeout_seconds() -> float:
     except ValueError:
         return 5.0
 
-
-
-
 def validate_login_url() -> str:
     return settings.validate_login_url
 
@@ -122,13 +117,6 @@ def validate_login_username() -> str:
 
 def validate_login_password() -> str:
     return settings.validate_login_password
-
-
-def validate_login_timeout_seconds() -> int:
-    try:
-        return max(1, int(settings.validate_login_timeout_seconds))
-    except ValueError:
-        return 30
 
 
 def validate_login_verify_ssl() -> bool:

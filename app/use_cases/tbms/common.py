@@ -8,15 +8,11 @@ from azurefunctions.extensions.http.fastapi import Request
 from app.core.config import (
     validate_login_api_key,
     validate_login_api_key_header,
-    validate_login_password,
-    validate_login_timeout_seconds,
-    validate_login_url,
-    validate_login_username,
+    source_api_timeout_seconds,
     validate_login_verify_ssl,
 )
 
 DEFAULT_TBMS_BASE_URL = "https://api.trojanholding.ae/Api/AI/EC"
-DEFAULT_TBMS_TIMEOUT_SECONDS = 60.0
 DEFAULT_TOKEN_CACHE_SECONDS = 1200.0
 DEFAULT_RETRY_ATTEMPTS = 2
 DEFAULT_RETRY_SLEEP_SECONDS = 1.0
@@ -26,10 +22,6 @@ _TOKEN_CACHE: Dict[str, Any] = {"token": "", "expires_at": 0.0}
 
 def _tbms_base_url() -> str:
     return DEFAULT_TBMS_BASE_URL.rstrip("/")
-
-
-def _tbms_timeout_seconds() -> float:
-    return DEFAULT_TBMS_TIMEOUT_SECONDS
 
 
 def _tbms_token_cache_seconds() -> float:
@@ -73,4 +65,3 @@ def request_query_params(req: Request) -> dict:
         return dict(query_params)
     except Exception:
         return {}
-

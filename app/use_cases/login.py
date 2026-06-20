@@ -8,7 +8,7 @@ from app.core.config import (
     validate_login_api_key,
     validate_login_api_key_header,
     validate_login_password,
-    validate_login_timeout_seconds,
+    source_api_timeout_seconds,
     validate_login_url,
     validate_login_username,
     validate_login_verify_ssl,
@@ -82,8 +82,9 @@ def _call_login_endpoint(source_url: str, api_key: str, username: str, password:
         source_url,
         headers=_login_headers(api_key),
         json_payload=_login_payload(username, password),
-        timeout=float(validate_login_timeout_seconds()),
+        timeout=source_api_timeout_seconds(),
         verify=verify_ssl,
+        retry_attempts=1,
     )
 
 
