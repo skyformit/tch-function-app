@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
-import re
+from datetime import date
 from typing import Any, Iterable, Optional
 
 from app.infrastructure.document_logo_extraction import extract_logo_presence_from_pdf
+from app.use_cases.trade_license_expiry import parse_trade_license_expiry_date
 
 
 @dataclass(frozen=True)
@@ -47,21 +47,6 @@ _VAT_NAME_FIELDS = ("LegalNameEnglish", "CompanyName", "LegalName")
 
 _BANK_NAME_FIELDS = ("AccountName", "CompanyName", "LegalNameEnglish", "BeneficiaryName", "AccountHolderName", "AccountHolder")
 
-_DATE_FORMATS = (
-    "%Y-%m-%d",
-    "%Y/%m/%d",
-    "%d/%m/%Y",
-    "%d-%m-%Y",
-    "%d/%m/%y",
-    "%m/%d/%Y",
-    "%d %B %Y",
-    "%d %b %Y",
-    "%B %d, %Y",
-    "%b %d, %Y",
-    "%B %d %Y",
-    "%b %d %Y",
-)
-
 
 def evaluate_document_acceptance(
     document_type: str,
@@ -102,7 +87,7 @@ def _evaluate_trade_license(
     if not licensed_activities:
         missing_fields.append("licensed_activities")
 
-    expiry_date = _parse_date(expiry_date_text)
+    expiry_date = parse_trade_license_expiry_date(expiry_date_text)
     if expiry_date_text and expiry_date is None:
         reasons.append("Expiry date is present but could not be parsed.")
     elif expiry_date is not None and expiry_date < today:
@@ -256,46 +241,3 @@ def _normalize_document_type(document_type: str) -> str:
     if normalized in {"bank", "bank letter", "bank document", "bank proof"}:
         return "bank"
     return normalized or "unknown"
-
-
-def _parse_date(value: Any) -> Optional[date]:
-    text = ("" if value is None else str(value)).strip()
-    if not text:
-        return None
-    candidates = [text, text.split("(", 1)[0].strip()]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        parsed = _parse_date_with_formats(candidate)
-        if parsed is not None:
-            return parsed
-    return _parse_date_with_fallback(text)
-
-
-def _parse_date_with_formats(text: str) -> Optional[date]:
-    cleaned = re.split(r"\s+\d{1,2}:\d{2}(?::\d{2})?", text, maxsplit=1)[0].strip().replace(",", "")
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(cleaned, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def _parse_date_with_fallback(text: str) -> Optional[date]:
-    cleaned = re.split(r"\s+\d{1,2}:\d{2}(?::\d{2})?", text, maxsplit=1)[0].strip()
-    cleaned = cleaned.replace(",", "")
-    extra_formats = (
-        "%B %d %Y",
-        "%b %d %Y",
-        "%d %B %Y",
-        "%d %b %Y",
-        "%Y %B %d",
-        "%Y %b %d",
-    )
-    for fmt in extra_formats:
-        try:
-            return datetime.strptime(cleaned, fmt).date()
-        except ValueError:
-            continue
-    return None
