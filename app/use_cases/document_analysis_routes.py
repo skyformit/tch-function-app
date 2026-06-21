@@ -18,6 +18,16 @@ def _bad_request(message: str) -> func.HttpResponse:
     return _json_response({"ok": False, "error": {"code": "bad_request", "message": message}}, status_code=400)
 
 
+def _raw_result_content_only(raw_result: object) -> str:
+    if isinstance(raw_result, dict):
+        value = raw_result.get("content")
+        if isinstance(value, str):
+            return value
+        if value is not None:
+            return str(value)
+    return ""
+
+
 async def _read_upload(req: Request) -> tuple[Optional[object], bytes, str]:
     form = await req.form()
     uploaded_file = form.get("file") or form.get("upload")
@@ -28,6 +38,7 @@ async def _read_upload(req: Request) -> tuple[Optional[object], bytes, str]:
 
 def _route_payload(profile: Optional[DocumentAnalysisProfile], is_trade: bool, outcome, file_bytes: bytes, content_type: Optional[str], target_fields: list[str]) -> dict:
     response_payload = build_trade_license_response(outcome, target_fields) if is_trade else build_document_analysis_response(outcome, profile)
+    response_payload["raw_results"] = _raw_result_content_only(outcome.raw_result)
     if is_trade:
         extras = build_trade_license_extras(outcome.raw_result, response_payload.get("results", {}), file_bytes)
         response_payload.update(extras)

@@ -374,7 +374,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         }
         outcome = AnalysisOutcome(
             provider="document_intelligence",
-            raw_result={"contents": [{"fields": {}}]},
+            raw_result={"content": "Company Name: CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)", "contents": [{"fields": {}}]},
             model_id="prebuilt-layout",
             api_version="2025-11-01",
             file_name="trade.pdf",
@@ -394,7 +394,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(payload["document_acceptance"]["status"], "approved")
         self.assertEqual(payload["document_acceptance"]["score"], 100)
         self.assertEqual(payload["document_acceptance"]["acceptable"], True)
-        self.assertNotIn("raw_results", payload)
+        self.assertEqual(payload["raw_results"], "Company Name: CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)")
         self.assertIn("gpt_review", payload)
         self.assertEqual(payload["gpt_review"]["is_consistent"], True)
         mock_extras.assert_called_once()

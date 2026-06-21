@@ -28,6 +28,8 @@ class DocumentSettings:
     document_review_openai_deployment_name: str = _env("DOCUMENT_REVIEW_OPENAI_DEPLOYMENT_NAME")
     document_review_openai_call_order: str = _env("DOCUMENT_REVIEW_OPENAI_CALL_ORDER", "review_first")
     document_review_openai_inter_call_delay_seconds: str = _env("DOCUMENT_REVIEW_OPENAI_INTER_CALL_DELAY_SECONDS", "0")
+    document_review_openai_min_tokens: str = _env("DOCUMENT_REVIEW_OPENAI_MIN_TOKENS", "0")
+    document_review_openai_max_tokens: str = _env("DOCUMENT_REVIEW_OPENAI_MAX_TOKENS", "4000")
     document_review_openai_system_prompt: str = _env(
         "DOCUMENT_REVIEW_OPENAI_SYSTEM_PROMPT",
         (
@@ -148,6 +150,20 @@ def document_review_openai_inter_call_delay_seconds() -> int:
         return max(0, int(settings.document_review_openai_inter_call_delay_seconds))
     except ValueError:
         return 0
+
+
+def document_review_openai_min_tokens() -> int:
+    try:
+        return max(0, int(settings.document_review_openai_min_tokens))
+    except ValueError:
+        return 0
+
+
+def document_review_openai_max_tokens() -> int:
+    try:
+        return max(1, int(settings.document_review_openai_max_tokens))
+    except ValueError:
+        return 4000
 
 
 def document_review_openai_system_prompt() -> str:

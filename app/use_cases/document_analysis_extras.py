@@ -16,6 +16,8 @@ from app.core.document_settings import (
     document_review_openai_api_version,
     document_review_openai_deployment_name,
     document_review_openai_endpoint,
+    document_review_openai_max_tokens,
+    document_review_openai_min_tokens,
     document_review_openai_system_prompt,
 )
 from app.infrastructure.document_qr_extraction import _extract_urls_from_text, extract_qr_codes_from_pdf, extract_verification_urls_from_pdf
@@ -103,7 +105,12 @@ def _build_openai_client_and_deployment(deployment_name: Optional[str] = None) -
 
 
 def _review_text(client: AzureOpenAI, extracted_fields: dict[str, Any], deployment: str) -> str:
-    response = client.chat.completions.create(model=deployment, messages=_review_messages(extracted_fields), temperature=0, max_tokens=4000)
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=_review_messages(extracted_fields),
+        temperature=0,
+        max_tokens=_review_max_tokens(),
+    )
     return (response.choices[0].message.content or "").strip()
 
 
@@ -132,7 +139,12 @@ def _review_unavailable(reasoning: str) -> dict[str, Any]:
 
 
 def _extraction_text(client: AzureOpenAI, raw_result: Any, deployment: str, today: date) -> str:
-    response = client.chat.completions.create(model=deployment, messages=_extraction_messages(raw_result, today), temperature=0, max_tokens=4000)
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=_extraction_messages(raw_result, today),
+        temperature=0,
+        max_tokens=_review_max_tokens(),
+    )
     return (response.choices[0].message.content or "").strip()
 
 
@@ -296,9 +308,13 @@ def _combined_text(client: AzureOpenAI, raw_result: Any, extracted_fields: dict[
         model=deployment,
         messages=_combined_messages(raw_result, extracted_fields, today),
         temperature=0,
-        max_tokens=4000,
+        max_tokens=_review_max_tokens(),
     )
     return (response.choices[0].message.content or "").strip()
+
+
+def _review_max_tokens() -> int:
+    return max(document_review_openai_min_tokens(), document_review_openai_max_tokens())
 
 
 def _combined_messages(raw_result: Any, extracted_fields: dict[str, Any], today: date) -> list[dict[str, str]]:
