@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.domain.document_analysis.profiles import BANK_PROFILE, VAT_PROFILE
@@ -390,6 +391,110 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(payload["document_acceptance"]["acceptable"], True)
         mock_extras.assert_called_once()
         mock_logo.assert_called_once()
+
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
+    @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
+    def test_vat_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+        mock_build_response.return_value = {"status": "success", "score": 0.91, "results": {"TaxRegistrationNumber": {"value": "100382292900003"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={"contents": [{"fields": {}}]},
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="vat.pdf",
+            container="bronze",
+            blob_name="vat.pdf",
+            upload_skipped=True,
+        )
+        profile = SimpleNamespace(route_name="ValidateVAT")
+        payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["TaxRegistrationNumber", "LegalNameEnglish"])
+        self.assertIn("llm_extraction", payload)
+        self.assertEqual(payload["llm_extraction"]["document_type"], "vat")
+        mock_llm_extraction.assert_called_once()
+        mock_build_response.assert_called_once()
+        mock_fallback.assert_called_once()
+
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
+    @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
+    def test_bank_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+        mock_build_response.return_value = {"status": "success", "score": 0.93, "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={"contents": [{"fields": {}}]},
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="bank.pdf",
+            container="bronze",
+            blob_name="bank.pdf",
+            upload_skipped=True,
+        )
+        profile = SimpleNamespace(route_name="ValidateBankDocument")
+        payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["BankName", "AccountName"])
+        self.assertIn("llm_extraction", payload)
+        self.assertEqual(payload["llm_extraction"]["document_type"], "bank")
+        mock_llm_extraction.assert_called_once()
+        mock_build_response.assert_called_once()
+        mock_fallback.assert_called_once()
+
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
+    @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
+    def test_vat_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+        mock_build_response.return_value = {
+            "status": "success",
+            "score": 0.91,
+            "results": {
+                "TaxRegistrationNumber": {"value": "100382292900003"},
+                "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+            },
+            "source": "document_intelligence",
+            "origin": "document_intelligence",
+            "source_type": "document_intelligence",
+        }
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={"contents": [{"fields": {}}]},
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="vat.pdf",
+            container="bronze",
+            blob_name="vat.pdf",
+            upload_skipped=True,
+        )
+        profile = SimpleNamespace(route_name="ValidateVAT")
+        payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["TaxRegistrationNumber", "LegalNameEnglish"])
+        self.assertIn("document_acceptance", payload)
+        self.assertEqual(payload["document_acceptance"]["status"], "approved")
+        self.assertTrue(payload["document_acceptance"]["acceptable"])
+        mock_llm_extraction.assert_called_once()
+        mock_build_response.assert_called_once()
+        mock_fallback.assert_called_once()
+
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
+    @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
+    def test_bank_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+        mock_build_response.return_value = {"status": "success", "score": 0.93, "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={"contents": [{"fields": {}}]},
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="bank.pdf",
+            container="bronze",
+            blob_name="bank.pdf",
+            upload_skipped=True,
+        )
+        profile = SimpleNamespace(route_name="ValidateBankDocument")
+        payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["BankName", "AccountName"])
+        self.assertIn("document_acceptance", payload)
+        self.assertEqual(payload["document_acceptance"]["status"], "approved")
+        self.assertTrue(payload["document_acceptance"]["acceptable"])
+        mock_llm_extraction.assert_called_once()
+        mock_build_response.assert_called_once()
+        mock_fallback.assert_called_once()
 
     def test_upload_blob_response_includes_storage_source(self) -> None:
         payload = _with_success_metadata({"container": "vendor-docs"}, "sample.pdf", "trade")

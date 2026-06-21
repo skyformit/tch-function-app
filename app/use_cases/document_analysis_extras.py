@@ -77,7 +77,7 @@ def review_with_azure_openai(extracted_fields: dict[str, Any], deployment_name: 
         return _review_failed(str(exc))
 
 
-def extract_trade_license_fields_with_azure_openai(raw_result: Any, today: Optional[date] = None, deployment_name: Optional[str] = None) -> dict[str, Any]:
+def extract_document_fields_with_azure_openai(raw_result: Any, today: Optional[date] = None, deployment_name: Optional[str] = None) -> dict[str, Any]:
     if AzureOpenAI is None:
         return _extraction_unavailable("openai package is not installed")
     try:
@@ -208,5 +208,5 @@ def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any]
     }
     gpt_review = review_with_azure_openai(extracted_fields)
     extras["gpt_review"] = gpt_review
-    extras["llm_extraction"] = extract_trade_license_fields_with_azure_openai(raw_result)
+    extras["llm_extraction"] = extract_document_fields_with_azure_openai(raw_result)
     return extras
