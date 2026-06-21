@@ -84,8 +84,9 @@ def extract_document_fields_with_azure_openai(raw_result: Any, today: Optional[d
         client, deployment = _build_openai_client_and_deployment(deployment_name)
         if client is None or deployment is None:
             return _extraction_unavailable("Missing extraction configuration")
-        raw_text = _extraction_text(client, raw_result, deployment, today=today or date.today())
-        return _parse_extraction(raw_text)
+        resolved_today = today or date.today()
+        raw_text = _extraction_text(client, raw_result, deployment, today=resolved_today)
+        return _normalize_extraction(_parse_extraction(raw_text), resolved_today)
     except Exception as exc:
         logging.error("Azure OpenAI extraction failed: %s", exc)
         return _extraction_failed(str(exc))
@@ -191,6 +192,31 @@ def _parse_extraction(raw_text: str) -> dict[str, Any]:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         return _extraction_failed(raw_text)
+
+
+def _normalize_extraction(extraction: dict[str, Any], today: date) -> dict[str, Any]:
+    if not isinstance(extraction, dict):
+        return extraction
+    normalized = dict(extraction)
+    expiry_entry = normalized.get("expiry_date")
+    is_expired_entry = normalized.get("is_expired")
+    if not isinstance(expiry_entry, dict):
+        return normalized
+    expiry_value = expiry_entry.get("value")
+    if expiry_value in (None, "", [], {}):
+        if isinstance(is_expired_entry, dict):
+            is_expired_entry["value"] = None
+            is_expired_entry["confidence"] = 0.0
+            normalized["is_expired"] = is_expired_entry
+        return normalized
+    from app.use_cases.trade_license_expiry import parse_trade_license_expiry_date
+
+    parsed_expiry = parse_trade_license_expiry_date(expiry_value)
+    if isinstance(is_expired_entry, dict):
+        is_expired_entry["value"] = bool(parsed_expiry and parsed_expiry < today)
+        is_expired_entry["confidence"] = 1.0 if parsed_expiry is not None else 0.0
+        normalized["is_expired"] = is_expired_entry
+    return normalized
 
 
 def _extraction_failed(reasoning: str) -> dict[str, Any]:
