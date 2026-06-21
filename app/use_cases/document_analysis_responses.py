@@ -16,6 +16,18 @@ def _response_payload(results: dict[str, dict[str, Any]], failure_message: str) 
     return _with_response_metadata({"status": "fail", "score": score, "results": sanitized_results, "error": {"code": "no_fields_found", "message": failure_message}}, source)
 
 
+def _normalize_results(profile: DocumentAnalysisProfile, results: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    normalized: dict[str, dict[str, Any]] = {}
+    for field_name, field_result in results.items():
+        if not isinstance(field_result, dict):
+            continue
+        normalized_result = dict(field_result)
+        normalized_value = profile.normalize_field_value(field_name, normalized_result.get("value"))
+        normalized_result["value"] = normalized_value
+        normalized[field_name] = normalized_result
+    return normalized
+
+
 def _pop_response_source(results: dict[str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], str]:
     sanitized_results = dict(results)
     source_entry = sanitized_results.pop("_source", None)
@@ -27,6 +39,7 @@ def _pop_response_source(results: dict[str, dict[str, Any]]) -> tuple[dict[str, 
 
 def build_trade_license_response(outcome: AnalysisOutcome, target_fields: list[str]) -> dict[str, Any]:
     results = build_trade_license_results(outcome, target_fields)
+    results = _normalize_results(TRADE_LICENSE_PROFILE, results)
     results = _filter_results(results, TRADE_LICENSE_PROFILE.minimum_confidence, TRADE_LICENSE_PROFILE.validators)
     results["_source"] = {"value": outcome.provider, "confidence": 1.0}
     return _response_payload(results, "No target trade license fields were extracted")
@@ -36,6 +49,7 @@ def build_document_analysis_response(outcome: AnalysisOutcome, profile: Document
     if profile.route_name == "ValidateVAT" and _debug_raw_keys_enabled():
         _log_raw_keys(outcome.raw_result)
     results = extract_fields_with_confidence(outcome.raw_result, profile.response_fields, field_aliases=profile.query_field_aliases)
+    results = _normalize_results(profile, results)
     results = _filter_results(results, profile.minimum_confidence, profile.validators)
     results["_source"] = {"value": outcome.provider, "confidence": 1.0}
     return _response_payload(results, profile.failure_message)

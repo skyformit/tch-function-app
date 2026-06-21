@@ -137,6 +137,62 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertNotIn("BusinessName", payload["results"])
         self.assertNotIn("TradeNameEnglish", payload["results"])
 
+    def test_trade_license_response_strips_legal_suffix_from_trade_name(self) -> None:
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={
+                "contents": [
+                    {
+                        "fields": {
+                            "TradeName": {
+                                "type": "string",
+                                "valueString": "GREEN LIFE EQUIPMENT TRADING - SOLE PROPRIETORSHIP L.L.C.",
+                                "confidence": 0.96,
+                            }
+                        }
+                    }
+                ]
+            },
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+
+        payload = build_trade_license_response(outcome, ["TradeName"])
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
+
+    def test_trade_license_response_strips_additional_legal_suffix_terms(self) -> None:
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={
+                "contents": [
+                    {
+                        "fields": {
+                            "TradeName": {
+                                "type": "string",
+                                "valueString": "GREEN LIFE EQUIPMENT TRADING - SOLE PROPRIETORSHIP",
+                                "confidence": 0.96,
+                            }
+                        }
+                    }
+                ]
+            },
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+
+        payload = build_trade_license_response(outcome, ["TradeName"])
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
+
     def test_vat_fallback_adds_tax_registration_number(self) -> None:
         payload = {
             "status": "success",

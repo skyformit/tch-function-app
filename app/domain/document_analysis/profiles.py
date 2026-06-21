@@ -27,6 +27,12 @@ def _normalize_alpha_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+def _normalize_entity_text(value: Any) -> str:
+    text = _normalize_text(value)
+    text = re.sub(r"[^A-Za-z]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
 def _contains_arabic_letters(value: Any) -> bool:
     text = _normalize_text(value)
     return bool(re.search(r"[\u0600-\u06FF]", text))
@@ -88,8 +94,10 @@ _LEGAL_SUFFIX_ONLY_VALUES = {
     "co",
     "company",
     "sole proprietorship",
+    "sole proprietor",
     "est",
     "establishment",
+    "branch",
 }
 
 
@@ -99,6 +107,18 @@ def _is_location_only(value: Any) -> bool:
 
 def _is_legal_suffix_only(value: Any) -> bool:
     return _normalize_alpha_text(value) in _LEGAL_SUFFIX_ONLY_VALUES
+
+
+def _is_legal_entity_suffix(value: Any) -> bool:
+    text = _normalize_entity_text(value)
+    if not text:
+        return False
+    suffix_patterns = [
+        r"^(sole proprietorship|sole proprietor|proprietorship|establishment|branch)$",
+        r"^(sole proprietorship\s+)?(llc|l l c|fze|fzc|pjsc|ltd|co|company|est|establishment|branch)$",
+        r"^(limited liability company|sole proprietorship company)$",
+    ]
+    return any(re.fullmatch(pattern, text) for pattern in suffix_patterns)
 
 
 def _looks_like_trade_name(value: Any) -> bool:
@@ -117,6 +137,16 @@ def _looks_like_business_name(value: Any) -> bool:
     if _is_location_only(text) or _is_legal_suffix_only(text):
         return False
     return True
+
+
+def _normalize_trade_name_value(value: Any) -> str:
+    text = _normalize_text(value)
+    if not text:
+        return text
+    parts = re.split(r"\s*[-–—]\s*", text, maxsplit=1)
+    if len(parts) == 2 and (_is_legal_suffix_only(parts[1]) or _is_legal_entity_suffix(parts[1])):
+        return parts[0].strip()
+    return text
 
 
 Validator = Callable[[Any], bool]
@@ -145,6 +175,11 @@ class DocumentAnalysisProfile:
                 if normalized_alias not in names:
                     names.append(normalized_alias)
         return names[:20]
+
+    def normalize_field_value(self, field_name: str, value: Any) -> Any:
+        if field_name in {"CompanyName", "TradeName", "TradeNameEnglish", "OperatingName", "BusinessName"}:
+            return _normalize_trade_name_value(value)
+        return value
 
 
 TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
