@@ -15,6 +15,7 @@ from app.core.document_settings import (
     document_review_openai_api_version,
     document_review_openai_deployment_name,
     document_review_openai_endpoint,
+    document_review_openai_system_prompt,
 )
 from app.infrastructure.document_qr_extraction import _extract_urls_from_text, extract_qr_codes_from_pdf, extract_verification_urls_from_pdf
 
@@ -88,19 +89,7 @@ def _review_messages(extracted_fields: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _review_system_prompt() -> str:
-    return (
-        "You are a document fraud-review assistant. You will be given fields "
-        "extracted from a scanned document (e.g., a trade license). Review them "
-        "for internal inconsistencies, implausible values, placeholder/test data, "
-        "date logic errors (e.g., expiry before issue date), formatting that looks "
-        "machine-altered, or anything that suggests the document is fake, templated, "
-        "or tampered with. "
-        "your judgment only on internal consistency and plausibility.\n\n"
-        "Respond with ONLY a JSON object, no markdown fences, no preamble, in this "
-        "exact shape:\n"
-        '{"is_consistent": true|false, "anomalies": ["..."], '
-        '"plausibility_score": 0.0-1.0, "reasoning": "short explanation"}'
-    )
+    return document_review_openai_system_prompt()
 
 
 def _parse_review(raw_text: str) -> dict[str, Any]:

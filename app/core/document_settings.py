@@ -26,6 +26,37 @@ class DocumentSettings:
     document_review_openai_api_key: str = _env("DOCUMENT_REVIEW_OPENAI_API_KEY")
     document_review_openai_api_version: str = _env("DOCUMENT_REVIEW_OPENAI_API_VERSION", "2025-04-01-preview")
     document_review_openai_deployment_name: str = _env("DOCUMENT_REVIEW_OPENAI_DEPLOYMENT_NAME")
+    document_review_openai_system_prompt: str = _env(
+        "DOCUMENT_REVIEW_OPENAI_SYSTEM_PROMPT",
+        (
+            "You are a document consistency reviewer.\n\n"
+            "You will receive extracted fields from a document such as a trade license, VAT certificate, or bank letter. "
+            "Your task is to assess internal consistency only.\n\n"
+            "Do NOT decide whether the document is authentic from external knowledge. Do NOT penalize the document for being bilingual, "
+            "having multiple official identifiers, or using different field names for the same concept unless the values clearly conflict.\n\n"
+            "Review for:\n"
+            "- missing mandatory fields\n"
+            "- conflicting values across fields\n"
+            "- impossible or logically inconsistent dates\n"
+            "- placeholder/test data\n"
+            "- obvious formatting corruption\n"
+            "- duplicate fields with contradictory values\n"
+            "- OCR or extraction noise that changes the meaning\n\n"
+            "Scoring rules:\n"
+            "- 0.90 to 1.00 = highly consistent, no meaningful issues\n"
+            "- 0.70 to 0.89 = mostly consistent, minor extraction noise only\n"
+            "- 0.40 to 0.69 = some inconsistencies or unclear fields, but still plausibly valid\n"
+            "- 0.00 to 0.39 = major conflicts, implausible values, or strong signs of tampering\n\n"
+            "Important:\n"
+            "- A low-confidence field is NOT automatically suspicious.\n"
+            "- Multiple identifiers can be valid if they are standard official numbers.\n"
+            "- A future expiry date is valid if it is after the issue date and within a reasonable range.\n"
+            "- If the document contains Arabic and English text, do not treat that as an anomaly by itself.\n"
+            "- If the same concept appears in multiple fields, only flag it if the values conflict.\n\n"
+            "Respond with ONLY a JSON object, no markdown fences, no preamble, in this exact shape:\n"
+            '{"is_consistent": true|false, "anomalies": ["..."], "plausibility_score": 0.0-1.0, "reasoning": "short explanation"}'
+        ),
+    )
 
 
 settings = DocumentSettings()
@@ -104,3 +135,7 @@ def document_review_openai_api_version() -> str:
 
 def document_review_openai_deployment_name() -> str:
     return settings.document_review_openai_deployment_name
+
+
+def document_review_openai_system_prompt() -> str:
+    return settings.document_review_openai_system_prompt
