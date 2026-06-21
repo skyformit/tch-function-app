@@ -297,12 +297,41 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
     @patch("app.use_cases.document_analysis_extras.AzureOpenAI")
     def test_trade_license_extras_include_gpt_review_when_openai_is_available(self, mock_azure_openai, *_patches) -> None:
         client = mock_azure_openai.return_value
-        client.chat.completions.create.return_value.choices = [
+        client.chat.completions.create.side_effect = [
             type(
-                "Choice",
+                "Response",
                 (),
-                {"message": type("Message", (), {"content": '{"is_consistent": true, "anomalies": [], "plausibility_score": 0.98, "reasoning": "Looks consistent."}'})()},
-            )
+                {
+                    "choices": [
+                        type(
+                            "Choice",
+                            (),
+                            {"message": type("Message", (), {"content": '{"is_consistent": true, "anomalies": [], "plausibility_score": 0.98, "reasoning": "Looks consistent."}'})()},
+                        )
+                    ]
+                },
+            )(),
+            type(
+                "Response",
+                (),
+                {
+                    "choices": [
+                        type(
+                            "Choice",
+                            (),
+                            {
+                                "message": type(
+                                    "Message",
+                                    (),
+                                    {
+                                        "content": '{"document_type":"trade","trade_license_number":{"value":"CN-1067688","confidence":0.95},"expiry_date":{"value":"2026-12-31","confidence":0.94},"is_expired":{"value":false,"confidence":1.0},"company_name":{"value":"ABC","confidence":0.9},"bank_name":{"value":null,"confidence":null},"account_number":{"value":null,"confidence":null},"iban":{"value":null,"confidence":null},"vat_number":{"value":null,"confidence":null},"license_activities":{"value":"Trading","confidence":0.9},"issue_date":{"value":"2026-01-01","confidence":0.92},"official_email":{"value":null,"confidence":null},"official_mobile":{"value":null,"confidence":null},"qr_codes":{"value":["https://example.com"],"confidence":0.95},"verification_urls":{"value":["https://example.com"],"confidence":0.95}}'
+                                    },
+                                )()
+                            },
+                        )
+                    ]
+                },
+            )(),
         ]
 
         extras = build_trade_license_extras(
@@ -313,6 +342,8 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
         self.assertEqual(extras["gpt_review"]["is_consistent"], True)
         self.assertEqual(extras["gpt_review"]["plausibility_score"], 0.98)
+        self.assertEqual(extras["llm_extraction"]["document_type"], "trade")
+        self.assertEqual(extras["llm_extraction"]["trade_license_number"]["value"], "CN-1067688")
 
     @patch("app.use_cases.document_analysis_routes.build_trade_license_response")
     @patch("app.use_cases.document_analysis_routes.build_trade_license_extras")

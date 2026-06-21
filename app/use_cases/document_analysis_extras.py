@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date
 from typing import Any, Optional
 
 try:
@@ -65,18 +66,39 @@ def build_verification_urls_result(raw_result: Any | None = None, file_bytes: by
 def review_with_azure_openai(extracted_fields: dict[str, Any], deployment_name: Optional[str] = None) -> dict[str, Any]:
     if AzureOpenAI is None:
         return _review_unavailable("openai package is not installed")
-    endpoint = document_review_openai_endpoint()
-    api_key = document_review_openai_api_key()
-    deployment = (deployment_name or document_review_openai_deployment_name() or "").strip()
-    if not endpoint or not deployment:
-        return _review_unavailable("Missing review configuration")
     try:
-        client = AzureOpenAI(azure_endpoint=endpoint, api_key=api_key, api_version=document_review_openai_api_version())
+        client, deployment = _build_openai_client_and_deployment(deployment_name)
+        if client is None or deployment is None:
+            return _review_unavailable("Missing review configuration")
         raw_text = _review_text(client, extracted_fields, deployment)
         return _parse_review(raw_text)
     except Exception as exc:
         logging.error("Azure OpenAI review failed: %s", exc)
         return _review_failed(str(exc))
+
+
+def extract_trade_license_fields_with_azure_openai(raw_result: Any, today: Optional[date] = None, deployment_name: Optional[str] = None) -> dict[str, Any]:
+    if AzureOpenAI is None:
+        return _extraction_unavailable("openai package is not installed")
+    try:
+        client, deployment = _build_openai_client_and_deployment(deployment_name)
+        if client is None or deployment is None:
+            return _extraction_unavailable("Missing extraction configuration")
+        raw_text = _extraction_text(client, raw_result, deployment, today=today or date.today())
+        return _parse_extraction(raw_text)
+    except Exception as exc:
+        logging.error("Azure OpenAI extraction failed: %s", exc)
+        return _extraction_failed(str(exc))
+
+
+def _build_openai_client_and_deployment(deployment_name: Optional[str] = None) -> tuple[Any | None, str | None]:
+    endpoint = document_review_openai_endpoint()
+    api_key = document_review_openai_api_key()
+    deployment = (deployment_name or document_review_openai_deployment_name() or "").strip()
+    if not endpoint or not deployment:
+        return None, None
+    client = AzureOpenAI(azure_endpoint=endpoint, api_key=api_key, api_version=document_review_openai_api_version())
+    return client, deployment
 
 
 def _review_text(client: AzureOpenAI, extracted_fields: dict[str, Any], deployment: str) -> str:
@@ -108,6 +130,77 @@ def _review_unavailable(reasoning: str) -> dict[str, Any]:
     return {"is_consistent": False, "anomalies": [reasoning], "plausibility_score": 0.0, "reasoning": reasoning, "skipped": True}
 
 
+def _extraction_text(client: AzureOpenAI, raw_result: Any, deployment: str, today: date) -> str:
+    response = client.chat.completions.create(model=deployment, messages=_extraction_messages(raw_result, today), temperature=0, max_tokens=1200)
+    return (response.choices[0].message.content or "").strip()
+
+
+def _extraction_messages(raw_result: Any, today: date) -> list[dict[str, str]]:
+    return [{"role": "system", "content": _extraction_system_prompt()}, {"role": "user", "content": f"Today: {today.isoformat()}\n\nRaw document analysis JSON:\n{json.dumps(raw_result, indent=2, ensure_ascii=False)}"}]
+
+
+def _extraction_system_prompt() -> str:
+    return (
+        "You are a document extraction assistant.\n\n"
+        "You will receive raw OCR / document analysis JSON from a PDF. Your job is to extract specific business and compliance fields exactly as they appear in the document.\n\n"
+        "Rules:\n"
+        "- Extract only fields that are explicitly present in the input.\n"
+        "- Do NOT guess, infer, or invent values.\n"
+        "- Do NOT merge unrelated values.\n"
+        "- Do NOT use external knowledge.\n"
+        "- Preserve the original value as closely as possible.\n"
+        "- Normalize whitespace.\n"
+        "- For dates, return ISO format YYYY-MM-DD when possible.\n"
+        "- If a field is missing or unclear, return null for its value.\n"
+        "- If multiple values exist for the same field, prefer the clearest exact value from the document.\n"
+        "- If the document contains both Arabic and English, extract the English value when available for English-name fields.\n"
+        "- Compute is_expired only when both expiry_date and today are available.\n"
+        "- is_expired should be true only when expiry_date is earlier than today.\n"
+        "- If the document type is not obvious, set document_type to \"unknown\".\n\n"
+        "If the document is a trade license:\n"
+        "- extract trade_license_number, expiry_date, company_name, license_activities, issue_date, official_email, official_mobile, qr_codes, verification_urls\n\n"
+        "If the document is a VAT document:\n"
+        "- extract vat_number, company_name, issue_date, official_email if present\n\n"
+        "If the document is a bank letter:\n"
+        "- extract bank_name, account_number, iban, account_holder/company_name, official_email if present\n\n"
+        "Return ONLY valid JSON. No markdown. No explanation.\n"
+        "Use this exact output schema:\n"
+        "{\n"
+        '  "document_type": "trade|bank|vat|unknown",\n'
+        '  "trade_license_number": {"value": null, "confidence": null},\n'
+        '  "expiry_date": {"value": null, "confidence": null},\n'
+        '  "is_expired": {"value": null, "confidence": null},\n'
+        '  "company_name": {"value": null, "confidence": null},\n'
+        '  "bank_name": {"value": null, "confidence": null},\n'
+        '  "account_number": {"value": null, "confidence": null},\n'
+        '  "iban": {"value": null, "confidence": null},\n'
+        '  "vat_number": {"value": null, "confidence": null},\n'
+        '  "license_activities": {"value": null, "confidence": null},\n'
+        '  "issue_date": {"value": null, "confidence": null},\n'
+        '  "official_email": {"value": null, "confidence": null},\n'
+        '  "official_mobile": {"value": null, "confidence": null},\n'
+        '  "qr_codes": {"value": [], "confidence": null},\n'
+        '  "verification_urls": {"value": [], "confidence": null}\n'
+        "}"
+    )
+
+
+def _parse_extraction(raw_text: str) -> dict[str, Any]:
+    cleaned = re.sub(r"^```(json)?|```$", "", raw_text, flags=re.MULTILINE).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return _extraction_failed(raw_text)
+
+
+def _extraction_failed(reasoning: str) -> dict[str, Any]:
+    return {"document_type": "unknown", "anomalies": ["Could not parse extraction output."], "reasoning": reasoning, "skipped": True}
+
+
+def _extraction_unavailable(reasoning: str) -> dict[str, Any]:
+    return {"document_type": "unknown", "anomalies": [reasoning], "reasoning": reasoning, "skipped": True}
+
+
 def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any], file_bytes: bytes | None = None) -> dict[str, Any]:
     extras = {
         "qr_codes": build_qr_codes_result(raw_result, file_bytes),
@@ -115,4 +208,5 @@ def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any]
     }
     gpt_review = review_with_azure_openai(extracted_fields)
     extras["gpt_review"] = gpt_review
+    extras["llm_extraction"] = extract_trade_license_fields_with_azure_openai(raw_result)
     return extras
