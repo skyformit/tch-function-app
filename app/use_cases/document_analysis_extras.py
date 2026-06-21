@@ -170,22 +170,34 @@ def _raw_result_content_only(raw_result: Any) -> Any:
 def _extraction_system_prompt() -> str:
     return (
         "You are a document extraction assistant.\n\n"
-        "You will receive raw OCR / document analysis JSON from a PDF. Your job is to extract only the trade license number exactly as it appears in the document.\n\n"
+        "You will receive raw OCR / document analysis content from a PDF. Your job is to extract the key fields exactly as they appear in the document.\n\n"
         "Rules:\n"
-        "- Extract only the trade license number when explicitly present.\n"
+        "- Extract only fields that are explicitly present.\n"
         "- Do NOT guess, infer, invent, or normalize beyond trimming whitespace.\n"
         "- Do NOT use external knowledge.\n"
         "- Normalize whitespace.\n"
-        "- If the trade license number is missing or unclear, return null for its value.\n"
+        "- If a field is missing or unclear, return null for its value.\n"
         "- If multiple values exist, prefer the clearest exact value from the document.\n"
-        "- If the document type is not obvious, set document_type to \"unknown\".\n\n"
-        "If the document is a trade license:\n"
-        "- extract trade_license_number only\n\n"
+        "- If the document type is not obvious, set document_type to \"unknown\".\n"
+        "- Use document_type values: trade, vat, bank, unknown.\n\n"
         "Return ONLY valid JSON. No markdown. No explanation.\n"
         "Use this exact output schema:\n"
         "{\n"
-        '  "document_type": "trade|unknown",\n'
-        '  "trade_license_number": {"value": null, "confidence": null}\n'
+        '  "document_type": "trade|vat|bank|unknown",\n'
+        '  "trade_license_number": {"value": null, "confidence": null},\n'
+        '  "expiry_date": {"value": null, "confidence": null},\n'
+        '  "is_expired": {"value": null, "confidence": null},\n'
+        '  "company_name": {"value": null, "confidence": null},\n'
+        '  "bank_name": {"value": null, "confidence": null},\n'
+        '  "account_number": {"value": null, "confidence": null},\n'
+        '  "iban": {"value": null, "confidence": null},\n'
+        '  "vat_number": {"value": null, "confidence": null},\n'
+        '  "license_activities": {"value": null, "confidence": null},\n'
+        '  "issue_date": {"value": null, "confidence": null},\n'
+        '  "official_email": {"value": null, "confidence": null},\n'
+        '  "official_mobile": {"value": null, "confidence": null},\n'
+        '  "qr_codes": {"value": [], "confidence": null},\n'
+        '  "verification_urls": {"value": [], "confidence": null}\n'
         "}"
     )
 
@@ -255,7 +267,33 @@ def project_llm_extraction_fields(llm_extraction: dict[str, Any] | None) -> dict
     if not isinstance(llm_extraction, dict):
         return {}
     document_type = str(llm_extraction.get("document_type") or "").strip().lower()
-    source_fields = {"trade": {"LicenseNo": "trade_license_number"}}.get(document_type, {})
+    source_fields = {
+        "trade": {
+            "LicenseNo": "trade_license_number",
+            "ExpiryDate": "expiry_date",
+            "IssueDate": "issue_date",
+            "LicenceActivities": "license_activities",
+            "CompanyName": "company_name",
+            "TradeName": "company_name",
+            "TradeNameEnglish": "company_name",
+            "OperatingName": "company_name",
+            "BusinessName": "company_name",
+            "OfficialEmail": "official_email",
+            "OfficialMobile": "official_mobile",
+        },
+        "vat": {
+            "TaxRegistrationNumber": "vat_number",
+            "LegalNameEnglish": "company_name",
+            "LegalNameArabic": "company_name",
+        },
+        "bank": {
+            "BankName": "bank_name",
+            "AccountName": "company_name",
+            "AccountNumber": "account_number",
+            "IBAN": "iban",
+            "SwiftCode": "bank_name",
+        },
+    }.get(document_type, {})
     projected: dict[str, dict[str, Any]] = {}
     for field_name, llm_field_name in source_fields.items():
         field_result = llm_extraction.get(llm_field_name)
@@ -336,7 +374,7 @@ def _combined_system_prompt() -> str:
         "You are a document intelligence assistant.\n"
         "You must produce both a document review and a document extraction in a single JSON response.\n\n"
         "gpt_review: inspect the extracted fields for internal inconsistencies, implausible values, placeholder/test data, date logic errors, formatting that looks machine-altered, or anything that suggests the document is fake, templated, or tampered with. Use only internal consistency and plausibility.\n\n"
-        "llm_extraction: extract the trade document fields exactly as they appear in the raw OCR/document analysis JSON. Do not guess or invent. Trim whitespace only.\n\n"
+        "llm_extraction: extract the key document fields exactly as they appear in the raw OCR/document analysis JSON. Do not guess or invent. Trim whitespace only.\n\n"
         "Return ONLY valid JSON. No markdown. No explanation.\n"
         "Use this exact output schema:\n"
         "{\n"
@@ -347,7 +385,7 @@ def _combined_system_prompt() -> str:
         '    "reasoning": ""\n'
         "  },\n"
         '  "llm_extraction": {\n'
-        '    "document_type": "trade|unknown",\n'
+        '    "document_type": "trade|vat|bank|unknown",\n'
         '    "trade_license_number": {"value": null, "confidence": null},\n'
         '    "expiry_date": {"value": null, "confidence": null},\n'
         '    "is_expired": {"value": null, "confidence": null},\n'

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from app.domain.document_analysis.profiles import BANK_PROFILE, VAT_PROFILE
 from app.infrastructure.document_qr_extraction import _extract_urls_from_text
-from app.use_cases.document_analysis_extras import build_trade_license_extras, extract_qr_codes, _raw_result_content_only
+from app.use_cases.document_analysis_extras import build_trade_license_extras, extract_qr_codes, _raw_result_content_only, project_llm_extraction_fields
 from app.use_cases.document_analysis import (
     AnalysisOutcome,
     _apply_bank_account_name_fallback,
@@ -275,6 +275,28 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(_raw_result_content_only({"documents": []}), "")
         self.assertEqual(_raw_result_content_only("plain text"), "")
 
+    def test_project_llm_extraction_fields_maps_vat_and_bank(self) -> None:
+        vat_projection = project_llm_extraction_fields(
+            {
+                "document_type": "vat",
+                "vat_number": {"value": "100042630200003", "confidence": 0.99},
+                "company_name": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C)", "confidence": 0.99},
+            }
+        )
+        bank_projection = project_llm_extraction_fields(
+            {
+                "document_type": "bank",
+                "bank_name": {"value": "Commercial Bank of Dubai", "confidence": 0.99},
+                "account_number": {"value": "1000078384", "confidence": 0.99},
+                "iban": {"value": "AE030230000001000078384", "confidence": 0.99},
+            }
+        )
+        self.assertEqual(vat_projection["TaxRegistrationNumber"]["value"], "100042630200003")
+        self.assertEqual(vat_projection["LegalNameEnglish"]["value"], "CONSTRUCTION MACHINERY CENTER CO.(L.L.C)")
+        self.assertEqual(bank_projection["BankName"]["value"], "Commercial Bank of Dubai")
+        self.assertEqual(bank_projection["AccountNumber"]["value"], "1000078384")
+        self.assertEqual(bank_projection["IBAN"]["value"], "AE030230000001000078384")
+
     @patch(
         "app.use_cases.document_analysis_extras.review_and_extract_with_azure_openai",
         return_value={
@@ -349,10 +371,11 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(extras["llm_extraction"]["trade_license_number"]["value"], "CN-1067688")
         mock_combined.assert_called_once()
 
+    @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 1.0, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.build_trade_license_response")
     @patch("app.use_cases.document_analysis_routes.build_trade_license_extras")
     @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
-    def test_trade_route_payload_includes_document_acceptance(self, mock_logo, mock_extras, mock_trade_response) -> None:
+    def test_trade_route_payload_includes_document_acceptance(self, mock_logo, mock_extras, mock_trade_response, mock_gpt_review) -> None:
         mock_trade_response.return_value = {
             "status": "success",
             "score": 0.9,
@@ -399,11 +422,13 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(payload["gpt_review"]["is_consistent"], True)
         mock_extras.assert_called_once()
         mock_logo.assert_called_once()
+        mock_gpt_review.assert_called_once()
 
+    @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
-    def test_vat_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_vat_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review) -> None:
         mock_build_response.return_value = {"status": "success", "score": 0.91, "results": {"TaxRegistrationNumber": {"value": "100382292900003"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -419,14 +444,18 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["TaxRegistrationNumber", "LegalNameEnglish"])
         self.assertIn("llm_extraction", payload)
         self.assertEqual(payload["llm_extraction"]["document_type"], "vat")
+        self.assertIn("gpt_review", payload)
+        self.assertEqual(payload["gpt_review"]["is_consistent"], True)
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
+        mock_gpt_review.assert_called_once()
 
+    @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
-    def test_bank_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_bank_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review) -> None:
         mock_build_response.return_value = {"status": "success", "score": 0.93, "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -442,14 +471,18 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["BankName", "AccountName"])
         self.assertIn("llm_extraction", payload)
         self.assertEqual(payload["llm_extraction"]["document_type"], "bank")
+        self.assertIn("gpt_review", payload)
+        self.assertEqual(payload["gpt_review"]["is_consistent"], True)
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
+        mock_gpt_review.assert_called_once()
 
+    @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
-    def test_vat_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_vat_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review) -> None:
         mock_build_response.return_value = {
             "status": "success",
             "score": 0.91,
@@ -479,11 +512,13 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
+        mock_gpt_review.assert_called_once()
 
+    @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
-    def test_bank_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_bank_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review) -> None:
         mock_build_response.return_value = {"status": "success", "score": 0.93, "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -503,6 +538,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
+        mock_gpt_review.assert_called_once()
 
     def test_upload_blob_response_includes_storage_source(self) -> None:
         payload = _with_success_metadata({"container": "vendor-docs"}, "sample.pdf", "trade")
