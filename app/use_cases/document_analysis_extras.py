@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from datetime import date
 from typing import Any, Optional
 
@@ -15,9 +14,7 @@ except ImportError:  # pragma: no cover - dependency may be absent in some local
 from app.core.document_settings import (
     document_review_openai_api_key,
     document_review_openai_api_version,
-    document_review_openai_call_order,
     document_review_openai_deployment_name,
-    document_review_openai_inter_call_delay_seconds,
     document_review_openai_endpoint,
     document_review_openai_system_prompt,
 )
@@ -284,19 +281,123 @@ def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any]
         "qr_codes": build_qr_codes_result(raw_result, file_bytes),
         "verification_urls": build_verification_urls_result(raw_result, file_bytes),
     }
-    call_order = document_review_openai_call_order().strip().lower().replace("-", "_")
-    delay_seconds = document_review_openai_inter_call_delay_seconds()
-    if call_order == "extraction_first":
-        extras["llm_extraction"] = extract_document_fields_with_azure_openai(raw_result)
-        _sleep_between_openai_calls(delay_seconds)
-        extras["gpt_review"] = review_with_azure_openai(extracted_fields)
-    else:
-        extras["gpt_review"] = review_with_azure_openai(extracted_fields)
-        _sleep_between_openai_calls(delay_seconds)
-        extras["llm_extraction"] = extract_document_fields_with_azure_openai(raw_result)
+    combined = review_and_extract_with_azure_openai(raw_result, extracted_fields)
+    extras["gpt_review"] = combined.get("gpt_review") or _review_unavailable("Combined review output missing")
+    extras["llm_extraction"] = combined.get("llm_extraction") or _extraction_unavailable("Combined extraction output missing")
     return extras
 
 
-def _sleep_between_openai_calls(delay_seconds: int) -> None:
-    if delay_seconds > 0:
-        time.sleep(delay_seconds)
+def review_and_extract_with_azure_openai(
+    raw_result: Any,
+    extracted_fields: dict[str, Any],
+    today: Optional[date] = None,
+    deployment_name: Optional[str] = None,
+) -> dict[str, Any]:
+    if AzureOpenAI is None:
+        return {
+            "gpt_review": _review_unavailable("openai package is not installed"),
+            "llm_extraction": _extraction_unavailable("openai package is not installed"),
+        }
+    try:
+        client, deployment = _build_openai_client_and_deployment(deployment_name)
+        if client is None or deployment is None:
+            unavailable = _review_unavailable("Missing review configuration")
+            unavailable_extraction = _extraction_unavailable("Missing extraction configuration")
+            return {"gpt_review": unavailable, "llm_extraction": unavailable_extraction}
+        resolved_today = today or date.today()
+        raw_text = _combined_text(client, raw_result, extracted_fields, deployment, resolved_today)
+        return _parse_combined_output(raw_text, resolved_today)
+    except Exception as exc:
+        logging.error("Azure OpenAI combined review/extraction failed: %s", exc)
+        return {
+            "gpt_review": _review_failed(str(exc)),
+            "llm_extraction": _extraction_failed(str(exc)),
+        }
+
+
+def _combined_text(client: AzureOpenAI, raw_result: Any, extracted_fields: dict[str, Any], deployment: str, today: date) -> str:
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=_combined_messages(raw_result, extracted_fields, today),
+        temperature=0,
+        max_tokens=1800,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+def _combined_messages(raw_result: Any, extracted_fields: dict[str, Any], today: date) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": _combined_system_prompt()},
+        {
+            "role": "user",
+            "content": (
+                f"Today: {today.isoformat()}\n\n"
+                f"Extracted fields:\n{json.dumps(extracted_fields, indent=2, ensure_ascii=False)}\n\n"
+                f"Raw document analysis JSON:\n{json.dumps(raw_result, indent=2, ensure_ascii=False)}"
+            ),
+        },
+    ]
+
+
+def _combined_system_prompt() -> str:
+    return (
+        "You are a document intelligence assistant that must produce both an internal consistency review and a structured field extraction in one response.\n\n"
+        "First, review the extracted fields for internal consistency only.\n"
+        "Do NOT decide whether the document is authentic from external knowledge. Do NOT penalize bilingual text or alternate field names unless the values clearly conflict.\n"
+        "Review for missing mandatory fields, conflicting values, impossible or logically inconsistent dates, placeholder/test data, obvious formatting corruption, duplicate contradictory fields, and OCR or extraction noise.\n\n"
+        "Second, extract the requested business and compliance fields from the raw OCR / document analysis JSON exactly as they appear.\n"
+        "Do NOT guess, infer, invent, or use external knowledge.\n"
+        "Preserve the original value as closely as possible and normalize whitespace.\n"
+        "For dates, return ISO format YYYY-MM-DD when possible.\n"
+        "If a field is missing or unclear, return null for its value.\n"
+        "If multiple values exist for the same field, prefer the clearest exact value from the document.\n"
+        "If the document contains both Arabic and English, extract the English value when available for English-name fields.\n"
+        "Compute is_expired only when both expiry_date and today are available.\n"
+        "is_expired should be true only when expiry_date is earlier than today.\n"
+        "If the document type is not obvious, set document_type to \"unknown\".\n\n"
+        "Extract for trade license documents:\n"
+        "- trade_license_number, expiry_date, company_name, license_activities, issue_date, official_email, official_mobile, qr_codes, verification_urls\n\n"
+        "Extract for VAT documents:\n"
+        "- vat_number, company_name, issue_date, official_email if present\n\n"
+        "Extract for bank letters:\n"
+        "- bank_name, account_number, iban, account_holder/company_name, official_email if present\n\n"
+        "Return ONLY valid JSON. No markdown. No explanation.\n"
+        "Use this exact output schema:\n"
+        "{\n"
+        '  "gpt_review": {"is_consistent": true|false, "anomalies": ["..."], "plausibility_score": 0.0-1.0, "reasoning": "short explanation"},\n'
+        '  "llm_extraction": {\n'
+        '    "document_type": "trade|bank|vat|unknown",\n'
+        '    "trade_license_number": {"value": null, "confidence": null},\n'
+        '    "expiry_date": {"value": null, "confidence": null},\n'
+        '    "is_expired": {"value": null, "confidence": null},\n'
+        '    "company_name": {"value": null, "confidence": null},\n'
+        '    "bank_name": {"value": null, "confidence": null},\n'
+        '    "account_number": {"value": null, "confidence": null},\n'
+        '    "iban": {"value": null, "confidence": null},\n'
+        '    "vat_number": {"value": null, "confidence": null},\n'
+        '    "license_activities": {"value": null, "confidence": null},\n'
+        '    "issue_date": {"value": null, "confidence": null},\n'
+        '    "official_email": {"value": null, "confidence": null},\n'
+        '    "official_mobile": {"value": null, "confidence": null},\n'
+        '    "qr_codes": {"value": [], "confidence": null},\n'
+        '    "verification_urls": {"value": [], "confidence": null}\n'
+        "  }\n"
+        "}"
+    )
+
+
+def _parse_combined_output(raw_text: str, today: date) -> dict[str, Any]:
+    cleaned = re.sub(r"^```(json)?|```$", "", raw_text, flags=re.MULTILINE).strip()
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {
+            "gpt_review": _review_failed(raw_text),
+            "llm_extraction": _extraction_failed(raw_text),
+        }
+    gpt_review = parsed.get("gpt_review")
+    llm_extraction = parsed.get("llm_extraction")
+    return {
+        "gpt_review": gpt_review if isinstance(gpt_review, dict) else _review_failed(raw_text),
+        "llm_extraction": _normalize_extraction(llm_extraction if isinstance(llm_extraction, dict) else _extraction_failed(raw_text), today),
+    }

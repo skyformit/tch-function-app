@@ -298,42 +298,27 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
     @patch("app.use_cases.document_analysis_extras.AzureOpenAI")
     def test_trade_license_extras_include_gpt_review_when_openai_is_available(self, mock_azure_openai, *_patches) -> None:
         client = mock_azure_openai.return_value
-        client.chat.completions.create.side_effect = [
-            type(
-                "Response",
-                (),
-                {
-                    "choices": [
-                        type(
-                            "Choice",
-                            (),
-                            {"message": type("Message", (), {"content": '{"is_consistent": true, "anomalies": [], "plausibility_score": 0.98, "reasoning": "Looks consistent."}'})()},
-                        )
-                    ]
-                },
-            )(),
-            type(
-                "Response",
-                (),
-                {
-                    "choices": [
-                        type(
-                            "Choice",
-                            (),
-                            {
-                                "message": type(
-                                    "Message",
-                                    (),
-                                    {
-                                        "content": '{"document_type":"trade","trade_license_number":{"value":"CN-1067688","confidence":0.95},"expiry_date":{"value":"2026-12-31","confidence":0.94},"is_expired":{"value":false,"confidence":1.0},"company_name":{"value":"ABC","confidence":0.9},"bank_name":{"value":null,"confidence":null},"account_number":{"value":null,"confidence":null},"iban":{"value":null,"confidence":null},"vat_number":{"value":null,"confidence":null},"license_activities":{"value":"Trading","confidence":0.9},"issue_date":{"value":"2026-01-01","confidence":0.92},"official_email":{"value":null,"confidence":null},"official_mobile":{"value":null,"confidence":null},"qr_codes":{"value":["https://example.com"],"confidence":0.95},"verification_urls":{"value":["https://example.com"],"confidence":0.95}}'
-                                    },
-                                )()
-                            },
-                        )
-                    ]
-                },
-            )(),
-        ]
+        client.chat.completions.create.return_value = type(
+            "Response",
+            (),
+            {
+                "choices": [
+                    type(
+                        "Choice",
+                        (),
+                        {
+                            "message": type(
+                                "Message",
+                                (),
+                                {
+                                    "content": '{"gpt_review": {"is_consistent": true, "anomalies": [], "plausibility_score": 0.98, "reasoning": "Looks consistent."}, "llm_extraction": {"document_type":"trade","trade_license_number":{"value":"CN-1067688","confidence":0.95},"expiry_date":{"value":"2026-12-31","confidence":0.94},"is_expired":{"value":false,"confidence":1.0},"company_name":{"value":"ABC","confidence":0.9},"bank_name":{"value":null,"confidence":null},"account_number":{"value":null,"confidence":null},"iban":{"value":null,"confidence":null},"vat_number":{"value":null,"confidence":null},"license_activities":{"value":"Trading","confidence":0.9},"issue_date":{"value":"2026-01-01","confidence":0.92},"official_email":{"value":null,"confidence":null},"official_mobile":{"value":null,"confidence":null},"qr_codes":{"value":["https://example.com"],"confidence":0.95},"verification_urls":{"value":["https://example.com"],"confidence":0.95}}}'
+                                },
+                            )()
+                        },
+                    )
+                ]
+            },
+        )()
 
         extras = build_trade_license_extras(
             {"contents": [{"barcodes": [{"kind": "qr", "value": "https://example.com"}]}]},
@@ -367,6 +352,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             "qr_codes": {"value": ["https://example.com/qr"], "confidence": 0.95},
             "verification_urls": {"value": ["https://example.com/verify"], "confidence": 0.95},
             "gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 1.0, "reasoning": "Looks consistent."},
+            "llm_extraction": {"document_type": "trade", "company_name": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)", "confidence": 0.95}},
         }
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -393,10 +379,10 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         mock_extras.assert_called_once()
         mock_logo.assert_called_once()
 
-    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.review_and_extract_with_azure_openai", return_value={"gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 0.99, "reasoning": "Looks consistent."}, "llm_extraction": {"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
-    def test_vat_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_vat_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_bundle) -> None:
         mock_build_response.return_value = {"status": "success", "score": 0.91, "results": {"TaxRegistrationNumber": {"value": "100382292900003"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -412,14 +398,14 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["TaxRegistrationNumber", "LegalNameEnglish"])
         self.assertIn("llm_extraction", payload)
         self.assertEqual(payload["llm_extraction"]["document_type"], "vat")
-        mock_llm_extraction.assert_called_once()
+        mock_llm_bundle.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
 
-    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.review_and_extract_with_azure_openai", return_value={"gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 0.99, "reasoning": "Looks consistent."}, "llm_extraction": {"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
-    def test_bank_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_bank_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_bundle) -> None:
         mock_build_response.return_value = {"status": "success", "score": 0.93, "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -435,14 +421,14 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["BankName", "AccountName"])
         self.assertIn("llm_extraction", payload)
         self.assertEqual(payload["llm_extraction"]["document_type"], "bank")
-        mock_llm_extraction.assert_called_once()
+        mock_llm_bundle.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
 
-    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.review_and_extract_with_azure_openai", return_value={"gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 0.99, "reasoning": "Looks consistent."}, "llm_extraction": {"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
-    def test_vat_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_vat_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_bundle) -> None:
         mock_build_response.return_value = {
             "status": "success",
             "score": 0.91,
@@ -469,14 +455,14 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertIn("document_acceptance", payload)
         self.assertEqual(payload["document_acceptance"]["status"], "approved")
         self.assertTrue(payload["document_acceptance"]["acceptable"])
-        mock_llm_extraction.assert_called_once()
+        mock_llm_bundle.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
 
-    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.review_and_extract_with_azure_openai", return_value={"gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 0.99, "reasoning": "Looks consistent."}, "llm_extraction": {"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
-    def test_bank_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_extraction) -> None:
+    def test_bank_route_payload_includes_document_acceptance(self, mock_fallback, mock_build_response, mock_llm_bundle) -> None:
         mock_build_response.return_value = {"status": "success", "score": 0.93, "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -493,7 +479,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertIn("document_acceptance", payload)
         self.assertEqual(payload["document_acceptance"]["status"], "approved")
         self.assertTrue(payload["document_acceptance"]["acceptable"])
-        mock_llm_extraction.assert_called_once()
+        mock_llm_bundle.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
 
