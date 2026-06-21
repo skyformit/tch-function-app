@@ -54,7 +54,7 @@ def evaluate_document_acceptance(
     today: Optional[date] = None,
     file_bytes: bytes | None = None,
 ) -> DocumentAcceptanceResult:
-    normalized_type = _normalize_document_type(document_type)
+    normalized_type = _resolve_document_type(document_type, payload)
     today = today or date.today()
     results = _results_section(payload)
 
@@ -276,3 +276,18 @@ def _normalize_document_type(document_type: str) -> str:
     if normalized in {"bank", "bank letter", "bank document", "bank proof"}:
         return "bank"
     return normalized or "unknown"
+
+
+def _resolve_document_type(document_type: str, payload: dict[str, Any]) -> str:
+    payload_document_type = None
+    if isinstance(payload, dict):
+        llm_extraction = payload.get("llm_extraction")
+        if isinstance(llm_extraction, dict):
+            payload_document_type = llm_extraction.get("document_type")
+
+    resolved_route_type = _normalize_document_type(document_type)
+    resolved_payload_type = _normalize_document_type(str(payload_document_type or ""))
+
+    if resolved_payload_type in {"trade", "vat", "bank"}:
+        return resolved_payload_type
+    return resolved_route_type

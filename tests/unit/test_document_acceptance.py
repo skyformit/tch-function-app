@@ -276,6 +276,20 @@ class DocumentAcceptanceTest(unittest.TestCase):
         self.assertIsNone(response["expiry_date"])
         self.assertIsNone(response["is_expired"])
 
+    def test_acceptance_prefers_llm_document_type_over_route(self) -> None:
+        payload = {
+            "results": {
+                "TaxRegistrationNumber": {"value": "100382292900003"},
+                "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+            },
+            "llm_extraction": {"document_type": "vat"},
+        }
+
+        result = evaluate_document_acceptance("trade", payload)
+        self.assertEqual(result.document_type, "vat")
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 60)
+
 
 if __name__ == "__main__":
     unittest.main()
