@@ -227,6 +227,55 @@ def _extraction_unavailable(reasoning: str) -> dict[str, Any]:
     return {"document_type": "unknown", "anomalies": [reasoning], "reasoning": reasoning, "skipped": True}
 
 
+def merge_llm_extraction_into_results(results: dict[str, Any], llm_extraction: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(results, dict) or not isinstance(llm_extraction, dict):
+        return results
+    merged = dict(results)
+    for field_name, field_result in project_llm_extraction_fields(llm_extraction).items():
+        value = field_result.get("value") if isinstance(field_result, dict) else None
+        if value in (None, "", [], {}):
+            continue
+        merged[field_name] = field_result
+    return merged
+
+
+def project_llm_extraction_fields(llm_extraction: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not isinstance(llm_extraction, dict):
+        return {}
+    document_type = str(llm_extraction.get("document_type") or "").strip().lower()
+    source_fields = {
+        "trade": {
+            "LicenseNo": "trade_license_number",
+            "ExpiryDate": "expiry_date",
+            "CompanyName": "company_name",
+            "LicenceActivities": "license_activities",
+            "IssueDate": "issue_date",
+            "OfficialEmail": "official_email",
+            "OfficialMobile": "official_mobile",
+        },
+        "vat": {
+            "TaxRegistrationNumber": "vat_number",
+            "LegalNameEnglish": "company_name",
+            "IssueDate": "issue_date",
+            "OfficialEmail": "official_email",
+        },
+        "bank": {
+            "BankName": "bank_name",
+            "AccountName": "company_name",
+            "AccountNumber": "account_number",
+            "IBAN": "iban",
+            "OfficialEmail": "official_email",
+            "OfficialMobile": "official_mobile",
+        },
+    }.get(document_type, {})
+    projected: dict[str, dict[str, Any]] = {}
+    for field_name, llm_field_name in source_fields.items():
+        field_result = llm_extraction.get(llm_field_name)
+        if isinstance(field_result, dict):
+            projected[field_name] = field_result
+    return projected
+
+
 def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any], file_bytes: bytes | None = None) -> dict[str, Any]:
     extras = {
         "qr_codes": build_qr_codes_result(raw_result, file_bytes),
