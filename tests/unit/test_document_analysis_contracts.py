@@ -11,6 +11,7 @@ from app.use_cases.document_analysis import (
     build_document_analysis_response,
     build_trade_license_response,
 )
+from app.use_cases.document_analysis_routes import _route_payload
 from app.use_cases.upload_blob import _with_success_metadata
 
 
@@ -268,7 +269,8 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         )
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
         self.assertEqual(extras["verification_urls"]["value"], ["https://example.com"])
-        self.assertNotIn("gpt_review", extras)
+        self.assertIn("gpt_review", extras)
+        self.assertTrue(extras["gpt_review"]["skipped"])
 
     def test_qr_url_fallback_normalizes_www_links(self) -> None:
         text = "To verify the license visit www.adra.gov.ae for details."
@@ -311,6 +313,52 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
         self.assertEqual(extras["gpt_review"]["is_consistent"], True)
         self.assertEqual(extras["gpt_review"]["plausibility_score"], 0.98)
+
+    @patch("app.use_cases.document_analysis_routes.build_trade_license_response")
+    @patch("app.use_cases.document_analysis_routes.build_trade_license_extras")
+    @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
+    def test_trade_route_payload_includes_document_acceptance(self, mock_logo, mock_extras, mock_trade_response) -> None:
+        mock_trade_response.return_value = {
+            "status": "success",
+            "score": 0.9,
+            "results": {
+                "LicenseNo": {"value": "206558", "confidence": 0.95},
+                "ExpiryDate": {"value": "06/04/2027", "confidence": 0.95},
+                "LicenceActivities": {"value": "Construction Equipment Trading", "confidence": 0.95},
+            },
+            "source": "document_intelligence",
+            "origin": "document_intelligence",
+            "source_type": "document_intelligence",
+        }
+        mock_extras.return_value = {
+            "qr_codes": {"value": ["https://example.com/qr"], "confidence": 0.95},
+            "verification_urls": {"value": ["https://example.com/verify"], "confidence": 0.95},
+            "gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 1.0, "reasoning": "Looks consistent."},
+        }
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={"contents": [{"fields": {}}]},
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+        payload = _route_payload(
+            profile=None,
+            is_trade=True,
+            outcome=outcome,
+            file_bytes=b"%PDF-1.4",
+            content_type="application/pdf",
+            target_fields=["LicenseNo", "ExpiryDate", "LicenceActivities"],
+        )
+        self.assertIn("document_acceptance", payload)
+        self.assertEqual(payload["document_acceptance"]["status"], "accept")
+        self.assertEqual(payload["document_acceptance"]["score"], 100)
+        self.assertEqual(payload["document_acceptance"]["acceptable"], True)
+        mock_extras.assert_called_once()
+        mock_logo.assert_called_once()
 
     def test_upload_blob_response_includes_storage_source(self) -> None:
         payload = _with_success_metadata({"container": "vendor-docs"}, "sample.pdf", "trade")

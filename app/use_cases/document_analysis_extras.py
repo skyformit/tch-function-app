@@ -114,6 +114,5 @@ def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any]
         "verification_urls": build_verification_urls_result(raw_result, file_bytes),
     }
     gpt_review = review_with_azure_openai(extracted_fields)
-    if not gpt_review.get("skipped"):
-        extras["gpt_review"] = gpt_review
+    extras["gpt_review"] = gpt_review
     return extras

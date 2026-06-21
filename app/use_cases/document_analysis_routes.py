@@ -8,6 +8,7 @@ from app.domain.document_analysis.profiles import DocumentAnalysisProfile
 from app.infrastructure.storage.blob_storage import clean_name as _clean_name
 from app.use_cases.document_analysis_fallbacks import _apply_bank_account_name_fallback, _apply_vat_analysis_fallback
 from app.use_cases.document_analysis_extras import build_trade_license_extras
+from app.use_cases.document_acceptance import build_document_acceptance_response
 from app.use_cases.document_analysis_responses import build_document_analysis_response, build_trade_license_response
 from app.use_cases.document_analysis_runtime import analyze_trade_license_document
 from core.foundry import _json_response
@@ -29,6 +30,7 @@ def _route_payload(profile: Optional[DocumentAnalysisProfile], is_trade: bool, o
     response_payload = build_trade_license_response(outcome, target_fields) if is_trade else build_document_analysis_response(outcome, profile)
     if is_trade:
         response_payload.update(build_trade_license_extras(outcome.raw_result, response_payload.get("results", {}), file_bytes))
+        response_payload["document_acceptance"] = build_document_acceptance_response("trade", response_payload, file_bytes=file_bytes)
     if profile and profile.route_name == "ValidateVAT":
         return _apply_vat_analysis_fallback(response_payload, file_bytes, content_type)
     if profile and profile.route_name == "ValidateBankDocument":

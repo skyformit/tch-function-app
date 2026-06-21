@@ -53,8 +53,29 @@ class DocumentAcceptanceTest(unittest.TestCase):
 
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
         self.assertEqual(result.status, "accept")
-        self.assertIn("GPT review contribution: +12.", result.reasons)
+        self.assertIn("Expert review contribution: +12.", result.reasons)
         self.assertEqual(result.score, 72)
+
+    def test_trade_license_reports_unavailable_gpt_review(self) -> None:
+        payload = {
+            "results": {
+                "LicenseNo": {"value": "206558"},
+                "ExpiryDate": {"value": "06/04/2027"},
+                "LicenceActivities": {"value": "Construction Equipment Trading"},
+            },
+            "gpt_review": {
+                "is_consistent": False,
+                "anomalies": ["Missing review configuration"],
+                "plausibility_score": 0.0,
+                "reasoning": "Missing review configuration",
+                "skipped": True,
+            },
+        }
+
+        result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
+        self.assertEqual(result.status, "accept")
+        self.assertIn("Expert review unavailable: Missing review configuration.", result.reasons)
+        self.assertEqual(result.score, 60)
 
     @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
     def test_trade_license_scores_logo_presence(self, mock_logo: object) -> None:
@@ -91,7 +112,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21), file_bytes=b"%PDF-1.4")
         self.assertEqual(result.status, "accept")
         self.assertIn("Logo present.", result.reasons)
-        self.assertIn("GPT review contribution: +15.", result.reasons)
+        self.assertIn("Expert review contribution: +15.", result.reasons)
         self.assertEqual(result.score, 85)
         mock_logo.assert_called_once()
 

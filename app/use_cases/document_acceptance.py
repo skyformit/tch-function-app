@@ -116,10 +116,13 @@ def _evaluate_trade_license(
 
     gpt_review = _gpt_review(payload)
     if gpt_review is not None:
-        gpt_score = _gpt_review_weight(gpt_review)
-        score += gpt_score
-        score = min(score, 100)
-        reasons.append(f"GPT review contribution: +{gpt_score}.")
+        if gpt_review.get("skipped"):
+            reasons.append(f"Expert review unavailable: {gpt_review.get('reasoning') or 'not configured'}.")
+        else:
+            gpt_score = _gpt_review_weight(gpt_review)
+            score += gpt_score
+            score = min(score, 100)
+            reasons.append(f"Expert review contribution: +{gpt_score}.")
 
     score = min(score, 100)
     return _result("trade", "accept", [], reasons, score_override=score)
