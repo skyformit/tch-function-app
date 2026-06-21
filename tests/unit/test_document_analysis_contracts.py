@@ -193,6 +193,36 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
 
+    def test_trade_license_response_splits_merged_unified_numbers(self) -> None:
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={
+                "contents": [
+                    {
+                        "fields": {
+                            "LicenceNumber": {
+                                "type": "string",
+                                "valueString": "101-2021-100011570 501-2010-100077987",
+                                "confidence": 0.31,
+                            }
+                        }
+                    }
+                ]
+            },
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+
+        payload = build_trade_license_response(outcome, ["LicenceNumber", "UnifiedRegistrationNo", "UnifiedLicenceNo"])
+        self.assertEqual(payload["status"], "success")
+        self.assertNotIn("LicenceNumber", payload["results"])
+        self.assertEqual(payload["results"]["UnifiedRegistrationNo"]["value"], "101-2021-100011570")
+        self.assertEqual(payload["results"]["UnifiedLicenceNo"]["value"], "501-2010-100077987")
+
     def test_vat_fallback_adds_tax_registration_number(self) -> None:
         payload = {
             "status": "success",

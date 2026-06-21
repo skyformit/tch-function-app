@@ -189,6 +189,8 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
         "LicenseNo",
         "LicenceNo",
         "LicenceNumber",
+        "UnifiedRegistrationNo",
+        "UnifiedLicenceNo",
         "LicenceActivities",
         "CompanyName",
         "TradeName",
@@ -202,6 +204,8 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
     ],
     query_field_aliases={
         "LicenceActivities": ["LicenseActivities", "Licence Activities", "License Activities"],
+        "UnifiedRegistrationNo": ["UnifiedRegistrationNo", "UnifiedRegistration", "RegistrationNo"],
+        "UnifiedLicenceNo": ["UnifiedLicenceNo", "UnifiedLicenseNo", "UnifiedLicence"],
         "CompanyName": ["Company Name", "Company", "LegalNameEnglish"],
         "IssueDate": ["IssuanceDate"],
         "OfficialEmail": ["Email"],

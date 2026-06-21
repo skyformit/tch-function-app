@@ -28,6 +28,28 @@ def _normalize_results(profile: DocumentAnalysisProfile, results: dict[str, dict
     return normalized
 
 
+def _split_merged_unified_numbers(results: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    merged = results.get("LicenceNumber")
+    if not isinstance(merged, dict):
+        return results
+    merged_value = merged.get("value")
+    if not isinstance(merged_value, str):
+        return results
+    parts = [part for part in merged_value.split() if part.strip()]
+    if len(parts) != 2:
+        return results
+    if any(not any(char.isdigit() for char in part) for part in parts):
+        return results
+    if "UnifiedRegistrationNo" in results or "UnifiedLicenceNo" in results:
+        return results
+    confidence = merged.get("confidence")
+    updated = dict(results)
+    updated["UnifiedRegistrationNo"] = {"value": parts[0], "confidence": confidence}
+    updated["UnifiedLicenceNo"] = {"value": parts[1], "confidence": confidence}
+    updated.pop("LicenceNumber", None)
+    return updated
+
+
 def _pop_response_source(results: dict[str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], str]:
     sanitized_results = dict(results)
     source_entry = sanitized_results.pop("_source", None)
@@ -40,6 +62,7 @@ def _pop_response_source(results: dict[str, dict[str, Any]]) -> tuple[dict[str, 
 def build_trade_license_response(outcome: AnalysisOutcome, target_fields: list[str]) -> dict[str, Any]:
     results = build_trade_license_results(outcome, target_fields)
     results = _normalize_results(TRADE_LICENSE_PROFILE, results)
+    results = _split_merged_unified_numbers(results)
     results = _filter_results(results, TRADE_LICENSE_PROFILE.minimum_confidence, TRADE_LICENSE_PROFILE.validators)
     results["_source"] = {"value": outcome.provider, "confidence": 1.0}
     return _response_payload(results, "No target trade license fields were extracted")
