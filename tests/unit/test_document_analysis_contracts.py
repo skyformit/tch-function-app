@@ -267,7 +267,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}},
         )
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
-        self.assertEqual(extras["verification_urls"]["value"], None)
+        self.assertEqual(extras["verification_urls"]["value"], ["https://example.com"])
         self.assertNotIn("gpt_review", extras)
 
     def test_qr_url_fallback_normalizes_www_links(self) -> None:

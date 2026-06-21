@@ -16,7 +16,7 @@ from app.core.document_settings import (
     document_review_openai_deployment_name,
     document_review_openai_endpoint,
 )
-from app.infrastructure.document_qr_extraction import extract_qr_codes_from_pdf, extract_verification_urls_from_pdf
+from app.infrastructure.document_qr_extraction import _extract_urls_from_text, extract_qr_codes_from_pdf, extract_verification_urls_from_pdf
 
 
 def extract_qr_codes(json_data: Any) -> list[str]:
@@ -53,8 +53,11 @@ def build_qr_codes_result(raw_result: Any, file_bytes: bytes | None = None) -> d
     return {"value": qr_codes or None, "confidence": 0.95 if qr_codes else 0.0}
 
 
-def build_verification_urls_result(file_bytes: bytes | None = None) -> dict[str, Any]:
+def build_verification_urls_result(raw_result: Any | None = None, file_bytes: bytes | None = None) -> dict[str, Any]:
     urls = extract_verification_urls_from_pdf(file_bytes) if file_bytes else []
+    if not urls and raw_result is not None:
+        for payload in extract_qr_codes(raw_result):
+            urls.extend(_extract_urls_from_text(payload))
     return {"value": urls or None, "confidence": 0.95 if urls else 0.0}
 
 
@@ -119,7 +122,7 @@ def _review_unavailable(reasoning: str) -> dict[str, Any]:
 def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any], file_bytes: bytes | None = None) -> dict[str, Any]:
     extras = {
         "qr_codes": build_qr_codes_result(raw_result, file_bytes),
-        "verification_urls": build_verification_urls_result(file_bytes),
+        "verification_urls": build_verification_urls_result(raw_result, file_bytes),
     }
     gpt_review = review_with_azure_openai(extracted_fields)
     if not gpt_review.get("skipped"):

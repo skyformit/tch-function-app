@@ -19,43 +19,49 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     Image = None
 
+try:
+    import fitz
+except ImportError:  # pragma: no cover - optional dependency
+    fitz = None
+
 from pypdf import PdfReader
 
 
 def extract_qr_codes_from_pdf(file_bytes: bytes) -> list[str]:
     if not file_bytes:
         return []
-    if PdfReader is None:
-        return []
-
-    try:
-        reader = PdfReader(io.BytesIO(file_bytes))
-    except Exception:
-        return []
-
     qr_codes: list[str] = []
-    for page in reader.pages:
-        qr_codes.extend(_extract_qr_codes_from_page(page))
+    reader = _open_pdf_reader(file_bytes)
+    if reader is not None:
+        for page in reader.pages:
+            qr_codes.extend(_extract_qr_codes_from_page(page))
+        if not qr_codes:
+            qr_codes.extend(_extract_urls_from_reader(reader))
     if not qr_codes:
-        qr_codes.extend(_extract_urls_from_reader(reader))
+        qr_codes.extend(_extract_qr_codes_from_rendered_pdf(file_bytes))
     return _unique_values(qr_codes)
 
 
 def extract_verification_urls_from_pdf(file_bytes: bytes) -> list[str]:
     if not file_bytes:
         return []
-    if PdfReader is None:
-        return []
-
-    try:
-        reader = PdfReader(io.BytesIO(file_bytes))
-    except Exception:
-        return []
-
     urls: list[str] = []
-    for page in reader.pages:
-        urls.extend(_extract_urls_from_text(_page_text(page)))
+    reader = _open_pdf_reader(file_bytes)
+    if reader is not None:
+        for page in reader.pages:
+            urls.extend(_extract_urls_from_text(_page_text(page)))
+    if not urls:
+        urls.extend(_extract_urls_from_qr_payloads(file_bytes))
     return _unique_values(urls)
+
+
+def _open_pdf_reader(file_bytes: bytes) -> Any | None:
+    if PdfReader is None:
+        return None
+    try:
+        return PdfReader(io.BytesIO(file_bytes))
+    except Exception:
+        return None
 
 
 def _extract_qr_codes_from_page(page: Any) -> list[str]:
@@ -80,6 +86,26 @@ def _extract_qr_codes_from_page(page: Any) -> list[str]:
     return qr_codes
 
 
+def _extract_qr_codes_from_rendered_pdf(file_bytes: bytes) -> list[str]:
+    if fitz is None or Image is None or cv2 is None or np is None:
+        return []
+    try:
+        document = fitz.open(stream=file_bytes, filetype="pdf")
+    except Exception:
+        return []
+
+    qr_codes: list[str] = []
+    for page_index in range(len(document)):
+        try:
+            page = document[page_index]
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
+            qr_codes.extend(_decode_qr_from_image_array(np.array(image)))
+        except Exception:
+            continue
+    return qr_codes
+
+
 def _image_bytes(image_object: Any) -> bytes:
     try:
         return image_object.get_data()
@@ -92,7 +118,15 @@ def _decode_qr_from_image_bytes(image_bytes: bytes) -> list[str]:
         return []
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        image_array = np.array(image)
+        return _decode_qr_from_image_array(np.array(image))
+    except Exception:
+        return []
+
+
+def _decode_qr_from_image_array(image_array: Any) -> list[str]:
+    if cv2 is None or np is None:
+        return []
+    try:
         detector = cv2.QRCodeDetector()
         decoded_texts: list[str] = []
         try:
@@ -122,6 +156,14 @@ def _extract_urls_from_reader(reader: Any) -> list[str]:
     for page in getattr(reader, "pages", []):
         text = _page_text(page)
         urls.extend(_extract_urls_from_text(text))
+    return urls
+
+
+def _extract_urls_from_qr_payloads(file_bytes: bytes) -> list[str]:
+    qr_payloads = extract_qr_codes_from_pdf(file_bytes)
+    urls: list[str] = []
+    for payload in qr_payloads:
+        urls.extend(_extract_urls_from_text(payload))
     return urls
 
 
