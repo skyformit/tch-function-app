@@ -354,6 +354,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             "status": "success",
             "score": 0.9,
             "results": {
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)", "confidence": 0.95},
                 "LicenseNo": {"value": "206558", "confidence": 0.95},
                 "ExpiryDate": {"value": "06/04/2027", "confidence": 0.95},
                 "LicenceActivities": {"value": "Construction Equipment Trading", "confidence": 0.95},
@@ -383,7 +384,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             outcome=outcome,
             file_bytes=b"%PDF-1.4",
             content_type="application/pdf",
-            target_fields=["LicenseNo", "ExpiryDate", "LicenceActivities"],
+            target_fields=["TradeName", "LicenseNo", "ExpiryDate", "LicenceActivities"],
         )
         self.assertIn("document_acceptance", payload)
         self.assertEqual(payload["document_acceptance"]["status"], "approved")

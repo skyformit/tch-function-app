@@ -9,7 +9,22 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_accepts_complete_active_document(self) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
+                "ExpiryDate": {"value": "06/04/2027"},
+                "LicenceActivities": {"value": "Construction Equipment Trading"},
+            }
+        }
+
+        result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.missing_fields, [])
+        self.assertEqual(result.expiry_date, "2027-04-06")
+        self.assertFalse(result.is_expired)
+
+    def test_trade_license_accepts_without_license_number_when_name_is_present(self) -> None:
+        payload = {
+            "results": {
+                "CompanyName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             }
@@ -24,7 +39,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_scores_qr_and_verification_signals(self) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             },
@@ -43,7 +58,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_scores_gpt_review_contribution(self) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             },
@@ -65,7 +80,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_reports_unavailable_gpt_review(self) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             },
@@ -89,7 +104,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_scores_logo_presence(self, mock_logo: object) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             }
@@ -107,7 +122,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_scores_logo_and_gpt_review_together(self, mock_logo: object) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             },
@@ -132,7 +147,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_reports_logo_absence(self, mock_logo: object) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             }
@@ -149,7 +164,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_rejects_expired_document(self) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "206558"},
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2026"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
             }
@@ -165,7 +180,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_parses_month_name_expiry_date(self) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "DEMO-TL-000001"},
+                "TradeName": {"value": "Sanath Swaroop Mulky CO"},
                 "ExpiryDate": {"value": "31 December 2026"},
                 "LicenceActivities": {"value": "Information Technology Consultancy"},
             }
@@ -188,7 +203,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
             with self.subTest(payload_entry=payload_entry):
                 payload = {
                     "results": {
-                        "LicenseNo": {"value": "DEMO-TL-000001"},
+                        "TradeName": {"value": "Sanath Swaroop Mulky CO"},
                         "ExpiryDate": payload_entry["ExpiryDate"],
                         "LicenceActivities": {"value": "Information Technology Consultancy"},
                     }
@@ -200,7 +215,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
     def test_trade_license_parses_fallback_python_date(self) -> None:
         payload = {
             "results": {
-                "LicenseNo": {"value": "DEMO-TL-000001"},
+                "TradeName": {"value": "Sanath Swaroop Mulky CO"},
                 "ExpiryDate": {"value": "December 31, 2026"},
                 "LicenceActivities": {"value": "Information Technology Consultancy"},
             }

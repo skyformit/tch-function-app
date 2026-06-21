@@ -38,7 +38,7 @@ def build_document_acceptance_response(
     }
 
 
-_TRADE_LICENSE_NUMBER_FIELDS = ("LicenseNo", "LicenseNumber", "LicenceNo", "LicenceNumber")
+_TRADE_LICENSE_NAME_FIELDS = ("TradeName", "CompanyName", "TradeNameEnglish", "OperatingName", "BusinessName")
 _TRADE_LICENSE_EXPIRY_FIELDS = ("ExpiryDate",)
 _TRADE_LICENSE_ACTIVITY_FIELDS = ("LicenceActivities", "LicenseActivities", "License Activities", "Licence Activities")
 
@@ -76,12 +76,12 @@ def _evaluate_trade_license(
     missing_fields: list[str] = []
     reasons: list[str] = []
 
-    license_number = _first_value(results, _TRADE_LICENSE_NUMBER_FIELDS)
+    trade_name = _first_value(results, _TRADE_LICENSE_NAME_FIELDS)
     expiry_date_text = _first_value(results, _TRADE_LICENSE_EXPIRY_FIELDS)
     licensed_activities = _first_value(results, _TRADE_LICENSE_ACTIVITY_FIELDS)
 
-    if not license_number:
-        missing_fields.append("license_number")
+    if not trade_name:
+        missing_fields.append("trade_name")
     if not expiry_date_text:
         missing_fields.append("expiry_date")
     if not licensed_activities:
