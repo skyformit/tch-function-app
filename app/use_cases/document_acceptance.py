@@ -90,12 +90,12 @@ def _evaluate_trade_license(
     expiry_date = parse_trade_license_expiry_date(expiry_date_text)
     if expiry_date_text and expiry_date is None:
         reasons.append("Expiry date is present but could not be parsed.")
+        missing_fields.append("expiry_date")
     elif expiry_date is not None and expiry_date < today:
         reasons.append("Trade license is expired.")
+        missing_fields.append("expiry_date")
 
-    if missing_fields or (expiry_date is not None and expiry_date < today):
-        if expiry_date is not None and expiry_date < today and "expiry_date" not in missing_fields:
-            missing_fields.append("expiry_date")
+    if missing_fields:
         return _result("trade", "rejected", missing_fields, reasons, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
 
     score = 60
