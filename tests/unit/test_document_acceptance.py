@@ -234,7 +234,8 @@ class DocumentAcceptanceTest(unittest.TestCase):
         }
 
         result = evaluate_document_acceptance("vat", payload)
-        self.assertEqual(result.status, "approved")
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 60)
         self.assertEqual(result.missing_fields, [])
 
     def test_vat_rejects_missing_company_name(self) -> None:
@@ -248,7 +249,8 @@ class DocumentAcceptanceTest(unittest.TestCase):
         payload = {"results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}}
 
         result = evaluate_document_acceptance("bank", payload)
-        self.assertEqual(result.status, "approved")
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 60)
         self.assertEqual(result.missing_fields, [])
 
     def test_bank_rejects_missing_bank_name(self) -> None:
@@ -267,8 +269,8 @@ class DocumentAcceptanceTest(unittest.TestCase):
         }
 
         response = build_document_acceptance_response("vat", payload)
-        self.assertEqual(response["status"], "approved")
-        self.assertTrue(response["acceptable"])
+        self.assertEqual(response["status"], "rejected")
+        self.assertFalse(response["acceptable"])
         self.assertEqual(response["document_type"], "vat")
         self.assertEqual(response["missing_fields"], [])
         self.assertIsNone(response["expiry_date"])

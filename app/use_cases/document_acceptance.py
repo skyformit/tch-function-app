@@ -61,9 +61,9 @@ def evaluate_document_acceptance(
     if normalized_type == "trade":
         return _evaluate_trade_license(payload, results, today, file_bytes=file_bytes)
     if normalized_type == "vat":
-        return _evaluate_vat(results)
+        return _evaluate_vat(payload, results)
     if normalized_type == "bank":
-        return _evaluate_bank(results)
+        return _evaluate_bank(payload, results)
     return DocumentAcceptanceResult(document_type=normalized_type, status="rejected", score=0, missing_fields=[], reasons=[f"Unsupported document type: {document_type}"])
 
 
@@ -131,9 +131,8 @@ def _evaluate_trade_license(
     return _result("trade", _status_from_score(score), [], reasons, score_override=score, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
 
 
-def _evaluate_vat(results: dict[str, Any]) -> DocumentAcceptanceResult:
+def _evaluate_vat(payload: dict[str, Any], results: dict[str, Any]) -> DocumentAcceptanceResult:
     missing_fields: list[str] = []
-    reasons: list[str] = []
 
     tax_number = _first_value(results, _VAT_NUMBER_FIELDS)
     company_name = _first_value(results, _VAT_NAME_FIELDS)
@@ -144,14 +143,13 @@ def _evaluate_vat(results: dict[str, Any]) -> DocumentAcceptanceResult:
         missing_fields.append("company_name")
 
     if missing_fields:
-        return _result("vat", "rejected", missing_fields, reasons)
+        return _result("vat", "rejected", missing_fields, [])
 
-    return _result("vat", _status_from_score(100), [], reasons)
+    return _score_with_signals("vat", payload, file_bytes=None)
 
 
-def _evaluate_bank(results: dict[str, Any]) -> DocumentAcceptanceResult:
+def _evaluate_bank(payload: dict[str, Any], results: dict[str, Any]) -> DocumentAcceptanceResult:
     missing_fields: list[str] = []
-    reasons: list[str] = []
 
     company_name = _first_value(results, _BANK_NAME_FIELDS)
 
@@ -159,9 +157,46 @@ def _evaluate_bank(results: dict[str, Any]) -> DocumentAcceptanceResult:
         missing_fields.append("bank_name")
 
     if missing_fields:
-        return _result("bank", "rejected", missing_fields, reasons)
+        return _result("bank", "rejected", missing_fields, [])
 
-    return _result("bank", _status_from_score(100), [], reasons)
+    return _score_with_signals("bank", payload, file_bytes=None)
+
+
+def _score_with_signals(document_type: str, payload: dict[str, Any], file_bytes: bytes | None = None) -> DocumentAcceptanceResult:
+    score = 60
+    reasons: list[str] = []
+
+    if _signal_present(payload, "qr_codes"):
+        score += 20
+        reasons.append("QR code present.")
+    else:
+        reasons.append("QR code not found.")
+
+    if _signal_present(payload, "verification_urls"):
+        score += 20
+        reasons.append("Verification URL present.")
+    else:
+        reasons.append("Verification URL not found.")
+
+    if file_bytes is not None:
+        if extract_logo_presence_from_pdf(file_bytes):
+            score += 10
+            reasons.append("Logo present.")
+        else:
+            reasons.append("Logo not found.")
+
+    gpt_review = _gpt_review(payload)
+    if gpt_review is not None:
+        if gpt_review.get("skipped"):
+            reasons.append(f"Expert review unavailable: {gpt_review.get('reasoning') or 'not configured'}.")
+        else:
+            gpt_score = _gpt_review_weight(gpt_review)
+            score += gpt_score
+            score = min(score, 100)
+            reasons.append(f"Expert review contribution: +{gpt_score}.")
+
+    score = min(score, 100)
+    return _result(document_type, _status_from_score(score), [], reasons, score_override=score)
 
 
 def _result(
