@@ -251,12 +251,12 @@ class DocumentAcceptanceTest(unittest.TestCase):
         self.assertEqual(result.status, "approved")
         self.assertEqual(result.missing_fields, [])
 
-    def test_bank_rejects_missing_company_name(self) -> None:
+    def test_bank_rejects_missing_bank_name(self) -> None:
         payload = {"results": {}}
 
         result = evaluate_document_acceptance("bank", payload)
         self.assertEqual(result.status, "rejected")
-        self.assertIn("company_name", result.missing_fields)
+        self.assertIn("bank_name", result.missing_fields)
 
     def test_response_wrapper_returns_frontend_shape(self) -> None:
         payload = {

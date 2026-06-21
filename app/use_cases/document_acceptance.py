@@ -156,7 +156,7 @@ def _evaluate_bank(results: dict[str, Any]) -> DocumentAcceptanceResult:
     company_name = _first_value(results, _BANK_NAME_FIELDS)
 
     if not company_name:
-        missing_fields.append("company_name")
+        missing_fields.append("bank_name")
 
     if missing_fields:
         return _result("bank", "rejected", missing_fields, reasons)
