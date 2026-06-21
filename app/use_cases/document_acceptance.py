@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import re
 from typing import Any, Iterable, Optional
 
 from app.infrastructure.document_logo_extraction import extract_logo_presence_from_pdf
@@ -14,6 +15,8 @@ class DocumentAcceptanceResult:
     score: int
     missing_fields: list[str]
     reasons: list[str]
+    expiry_date: str | None = None
+    is_expired: bool | None = None
 
 
 def build_document_acceptance_response(
@@ -29,7 +32,9 @@ def build_document_acceptance_response(
         "score": result.score,
         "missing_fields": result.missing_fields,
         "reasons": result.reasons,
-        "acceptable": result.status == "accept",
+        "acceptable": result.status == "approved",
+        "expiry_date": result.expiry_date,
+        "is_expired": result.is_expired,
     }
 
 
@@ -42,7 +47,20 @@ _VAT_NAME_FIELDS = ("LegalNameEnglish", "CompanyName", "LegalName")
 
 _BANK_NAME_FIELDS = ("AccountName", "CompanyName", "LegalNameEnglish", "BeneficiaryName", "AccountHolderName", "AccountHolder")
 
-_DATE_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y", "%m/%d/%Y")
+_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%d/%m/%Y",
+    "%d-%m-%Y",
+    "%d/%m/%y",
+    "%m/%d/%Y",
+    "%d %B %Y",
+    "%d %b %Y",
+    "%B %d, %Y",
+    "%b %d, %Y",
+    "%B %d %Y",
+    "%b %d %Y",
+)
 
 
 def evaluate_document_acceptance(
@@ -61,7 +79,7 @@ def evaluate_document_acceptance(
         return _evaluate_vat(results)
     if normalized_type == "bank":
         return _evaluate_bank(results)
-    return DocumentAcceptanceResult(document_type=normalized_type, status="reject", score=0, missing_fields=[], reasons=[f"Unsupported document type: {document_type}"])
+    return DocumentAcceptanceResult(document_type=normalized_type, status="rejected", score=0, missing_fields=[], reasons=[f"Unsupported document type: {document_type}"])
 
 
 def _evaluate_trade_license(
@@ -93,7 +111,7 @@ def _evaluate_trade_license(
     if missing_fields or (expiry_date is not None and expiry_date < today):
         if expiry_date is not None and expiry_date < today and "expiry_date" not in missing_fields:
             missing_fields.append("expiry_date")
-        return _result("trade", "reject", missing_fields, reasons)
+        return _result("trade", "rejected", missing_fields, reasons, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
 
     score = 60
     if _signal_present(payload, "qr_codes"):
@@ -125,7 +143,7 @@ def _evaluate_trade_license(
             reasons.append(f"Expert review contribution: +{gpt_score}.")
 
     score = min(score, 100)
-    return _result("trade", "accept", [], reasons, score_override=score)
+    return _result("trade", _status_from_score(score), [], reasons, score_override=score, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
 
 
 def _evaluate_vat(results: dict[str, Any]) -> DocumentAcceptanceResult:
@@ -141,9 +159,9 @@ def _evaluate_vat(results: dict[str, Any]) -> DocumentAcceptanceResult:
         missing_fields.append("company_name")
 
     if missing_fields:
-        return _result("vat", "reject", missing_fields, reasons)
+        return _result("vat", "rejected", missing_fields, reasons)
 
-    return _result("vat", "accept", [], reasons)
+    return _result("vat", _status_from_score(100), [], reasons)
 
 
 def _evaluate_bank(results: dict[str, Any]) -> DocumentAcceptanceResult:
@@ -156,9 +174,9 @@ def _evaluate_bank(results: dict[str, Any]) -> DocumentAcceptanceResult:
         missing_fields.append("company_name")
 
     if missing_fields:
-        return _result("bank", "reject", missing_fields, reasons)
+        return _result("bank", "rejected", missing_fields, reasons)
 
-    return _result("bank", "accept", [], reasons)
+    return _result("bank", _status_from_score(100), [], reasons)
 
 
 def _result(
@@ -167,9 +185,12 @@ def _result(
     missing_fields: list[str],
     reasons: list[str],
     score_override: Optional[int] = None,
+    expiry_date: date | None = None,
+    is_expired: bool | None = None,
 ) -> DocumentAcceptanceResult:
-    score = score_override if score_override is not None else (100 if status == "accept" else max(0, 100 - (len(missing_fields) * 30) - (10 if reasons else 0)))
-    return DocumentAcceptanceResult(document_type=document_type, status=status, score=score, missing_fields=missing_fields, reasons=reasons)
+    score = score_override if score_override is not None else (100 if status == "approved" else max(0, 100 - (len(missing_fields) * 30) - (10 if reasons else 0)))
+    expiry_date_text = expiry_date.isoformat() if expiry_date else None
+    return DocumentAcceptanceResult(document_type=document_type, status=status, score=score, missing_fields=missing_fields, reasons=reasons, expiry_date=expiry_date_text, is_expired=is_expired)
 
 
 def _results_section(payload: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +239,14 @@ def _gpt_review_weight(gpt_review: dict[str, Any]) -> int:
     return round(15 * score)
 
 
+def _status_from_score(score: int) -> str:
+    if score >= 91:
+        return "approved"
+    if score >= 81:
+        return "review"
+    return "rejected"
+
+
 def _normalize_document_type(document_type: str) -> str:
     normalized = (document_type or "").strip().lower().replace("_", " ").replace("-", " ")
     if normalized in {"trade", "trade license", "tradelicense", "trade licence", "trade license document"}:
@@ -233,10 +262,40 @@ def _parse_date(value: Any) -> Optional[date]:
     text = ("" if value is None else str(value)).strip()
     if not text:
         return None
-    text = text.split()[0].strip()
+    candidates = [text, text.split("(", 1)[0].strip()]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        parsed = _parse_date_with_formats(candidate)
+        if parsed is not None:
+            return parsed
+    return _parse_date_with_fallback(text)
+
+
+def _parse_date_with_formats(text: str) -> Optional[date]:
+    cleaned = re.split(r"\s+\d{1,2}:\d{2}(?::\d{2})?", text, maxsplit=1)[0].strip().replace(",", "")
     for fmt in _DATE_FORMATS:
         try:
-            return datetime.strptime(text, fmt).date()
+            return datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_date_with_fallback(text: str) -> Optional[date]:
+    cleaned = re.split(r"\s+\d{1,2}:\d{2}(?::\d{2})?", text, maxsplit=1)[0].strip()
+    cleaned = cleaned.replace(",", "")
+    extra_formats = (
+        "%B %d %Y",
+        "%b %d %Y",
+        "%d %B %Y",
+        "%d %b %Y",
+        "%Y %B %d",
+        "%Y %b %d",
+    )
+    for fmt in extra_formats:
+        try:
+            return datetime.strptime(cleaned, fmt).date()
         except ValueError:
             continue
     return None

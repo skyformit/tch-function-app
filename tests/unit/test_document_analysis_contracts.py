@@ -354,7 +354,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             target_fields=["LicenseNo", "ExpiryDate", "LicenceActivities"],
         )
         self.assertIn("document_acceptance", payload)
-        self.assertEqual(payload["document_acceptance"]["status"], "accept")
+        self.assertEqual(payload["document_acceptance"]["status"], "approved")
         self.assertEqual(payload["document_acceptance"]["score"], 100)
         self.assertEqual(payload["document_acceptance"]["acceptable"], True)
         mock_extras.assert_called_once()
