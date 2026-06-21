@@ -320,7 +320,7 @@ def _combined_text(client: AzureOpenAI, raw_result: Any, extracted_fields: dict[
         model=deployment,
         messages=_combined_messages(raw_result, extracted_fields, today),
         temperature=0,
-        max_tokens=1800,
+        max_tokens=900,
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -341,26 +341,13 @@ def _combined_messages(raw_result: Any, extracted_fields: dict[str, Any], today:
 
 def _combined_system_prompt() -> str:
     return (
-        "You are a document intelligence assistant that must produce both an internal consistency review and a structured field extraction in one response.\n\n"
-        "First, review the extracted fields for internal consistency only.\n"
-        "Do NOT decide whether the document is authentic from external knowledge. Do NOT penalize bilingual text or alternate field names unless the values clearly conflict.\n"
-        "Review for missing mandatory fields, conflicting values, impossible or logically inconsistent dates, placeholder/test data, obvious formatting corruption, duplicate contradictory fields, and OCR or extraction noise.\n\n"
-        "Second, extract the requested business and compliance fields from the raw OCR / document analysis JSON exactly as they appear.\n"
-        "Do NOT guess, infer, invent, or use external knowledge.\n"
-        "Preserve the original value as closely as possible and normalize whitespace.\n"
-        "For dates, return ISO format YYYY-MM-DD when possible.\n"
-        "If a field is missing or unclear, return null for its value.\n"
-        "If multiple values exist for the same field, prefer the clearest exact value from the document.\n"
-        "If the document contains both Arabic and English, extract the English value when available for English-name fields.\n"
-        "Compute is_expired only when both expiry_date and today are available.\n"
-        "is_expired should be true only when expiry_date is earlier than today.\n"
-        "If the document type is not obvious, set document_type to \"unknown\".\n\n"
-        "Extract for trade license documents:\n"
-        "- trade_license_number, expiry_date, company_name, license_activities, issue_date, official_email, official_mobile, qr_codes, verification_urls\n\n"
-        "Extract for VAT documents:\n"
-        "- vat_number, company_name, issue_date, official_email if present\n\n"
-        "Extract for bank letters:\n"
-        "- bank_name, account_number, iban, account_holder/company_name, official_email if present\n\n"
+        "You are a document intelligence assistant.\n"
+        "Return one JSON object with two keys: gpt_review and llm_extraction.\n\n"
+        "gpt_review: assess only internal consistency. Ignore external authenticity. Do not penalize bilingual text or alternate field names unless values conflict. Check missing mandatory fields, conflicting values, impossible dates, placeholder data, corruption, duplicates, and OCR noise.\n\n"
+        "llm_extraction: extract only what is explicitly present in the raw OCR/document analysis JSON. Do not guess or invent. Preserve values closely. Normalize whitespace. Use ISO dates when possible. Return null for missing/unclear fields. Prefer English values for English-name fields. Compute is_expired only when expiry_date is available.\n\n"
+        "Trade document fields: trade_license_number, expiry_date, company_name, license_activities, issue_date, official_email, official_mobile, qr_codes, verification_urls.\n"
+        "VAT fields: vat_number, company_name, issue_date, official_email.\n"
+        "Bank fields: bank_name, account_number, iban, account_holder/company_name, official_email.\n\n"
         "Return ONLY valid JSON. No markdown. No explanation.\n"
         "Use this exact output schema:\n"
         "{\n"
