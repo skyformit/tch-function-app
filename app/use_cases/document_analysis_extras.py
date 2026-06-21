@@ -103,7 +103,7 @@ def _build_openai_client_and_deployment(deployment_name: Optional[str] = None) -
 
 
 def _review_text(client: AzureOpenAI, extracted_fields: dict[str, Any], deployment: str) -> str:
-    response = client.chat.completions.create(model=deployment, messages=_review_messages(extracted_fields), temperature=0, max_tokens=600)
+    response = client.chat.completions.create(model=deployment, messages=_review_messages(extracted_fields), temperature=0, max_tokens=4000)
     return (response.choices[0].message.content or "").strip()
 
 
@@ -132,56 +132,48 @@ def _review_unavailable(reasoning: str) -> dict[str, Any]:
 
 
 def _extraction_text(client: AzureOpenAI, raw_result: Any, deployment: str, today: date) -> str:
-    response = client.chat.completions.create(model=deployment, messages=_extraction_messages(raw_result, today), temperature=0, max_tokens=1200)
+    response = client.chat.completions.create(model=deployment, messages=_extraction_messages(raw_result, today), temperature=0, max_tokens=4000)
     return (response.choices[0].message.content or "").strip()
 
 
 def _extraction_messages(raw_result: Any, today: date) -> list[dict[str, str]]:
-    return [{"role": "system", "content": _extraction_system_prompt()}, {"role": "user", "content": f"Today: {today.isoformat()}\n\nRaw document analysis JSON:\n{json.dumps(raw_result, indent=2, ensure_ascii=False)}"}]
+    return [
+        {"role": "system", "content": _extraction_system_prompt()},
+        {
+            "role": "user",
+            "content": (
+                f"Today: {today.isoformat()}\n\n"
+                f"Raw document analysis content:\n{json.dumps(_raw_result_content_only(raw_result), indent=2, ensure_ascii=False)}"
+            ),
+        },
+    ]
+
+
+def _raw_result_content_only(raw_result: Any) -> Any:
+    if isinstance(raw_result, dict):
+        return raw_result.get("content") or ""
+    return ""
 
 
 def _extraction_system_prompt() -> str:
     return (
         "You are a document extraction assistant.\n\n"
-        "You will receive raw OCR / document analysis JSON from a PDF. Your job is to extract specific business and compliance fields exactly as they appear in the document.\n\n"
+        "You will receive raw OCR / document analysis JSON from a PDF. Your job is to extract only the trade license number exactly as it appears in the document.\n\n"
         "Rules:\n"
-        "- Extract only fields that are explicitly present in the input.\n"
-        "- Do NOT guess, infer, or invent values.\n"
-        "- Do NOT merge unrelated values.\n"
+        "- Extract only the trade license number when explicitly present.\n"
+        "- Do NOT guess, infer, invent, or normalize beyond trimming whitespace.\n"
         "- Do NOT use external knowledge.\n"
-        "- Preserve the original value as closely as possible.\n"
         "- Normalize whitespace.\n"
-        "- For dates, return ISO format YYYY-MM-DD when possible.\n"
-        "- If a field is missing or unclear, return null for its value.\n"
-        "- If multiple values exist for the same field, prefer the clearest exact value from the document.\n"
-        "- If the document contains both Arabic and English, extract the English value when available for English-name fields.\n"
-        "- Compute is_expired only when both expiry_date and today are available.\n"
-        "- is_expired should be true only when expiry_date is earlier than today.\n"
+        "- If the trade license number is missing or unclear, return null for its value.\n"
+        "- If multiple values exist, prefer the clearest exact value from the document.\n"
         "- If the document type is not obvious, set document_type to \"unknown\".\n\n"
         "If the document is a trade license:\n"
-        "- extract trade_license_number, expiry_date, company_name, license_activities, issue_date, official_email, official_mobile, qr_codes, verification_urls\n\n"
-        "If the document is a VAT document:\n"
-        "- extract vat_number, company_name, issue_date, official_email if present\n\n"
-        "If the document is a bank letter:\n"
-        "- extract bank_name, account_number, iban, account_holder/company_name, official_email if present\n\n"
+        "- extract trade_license_number only\n\n"
         "Return ONLY valid JSON. No markdown. No explanation.\n"
         "Use this exact output schema:\n"
         "{\n"
-        '  "document_type": "trade|bank|vat|unknown",\n'
-        '  "trade_license_number": {"value": null, "confidence": null},\n'
-        '  "expiry_date": {"value": null, "confidence": null},\n'
-        '  "is_expired": {"value": null, "confidence": null},\n'
-        '  "company_name": {"value": null, "confidence": null},\n'
-        '  "bank_name": {"value": null, "confidence": null},\n'
-        '  "account_number": {"value": null, "confidence": null},\n'
-        '  "iban": {"value": null, "confidence": null},\n'
-        '  "vat_number": {"value": null, "confidence": null},\n'
-        '  "license_activities": {"value": null, "confidence": null},\n'
-        '  "issue_date": {"value": null, "confidence": null},\n'
-        '  "official_email": {"value": null, "confidence": null},\n'
-        '  "official_mobile": {"value": null, "confidence": null},\n'
-        '  "qr_codes": {"value": [], "confidence": null},\n'
-        '  "verification_urls": {"value": [], "confidence": null}\n'
+        '  "document_type": "trade|unknown",\n'
+        '  "trade_license_number": {"value": null, "confidence": null}\n'
         "}"
     )
 
@@ -198,24 +190,32 @@ def _normalize_extraction(extraction: dict[str, Any], today: date) -> dict[str, 
     if not isinstance(extraction, dict):
         return extraction
     normalized = dict(extraction)
-    expiry_entry = normalized.get("expiry_date")
-    is_expired_entry = normalized.get("is_expired")
-    if not isinstance(expiry_entry, dict):
-        return normalized
-    expiry_value = expiry_entry.get("value")
-    if expiry_value in (None, "", [], {}):
-        if isinstance(is_expired_entry, dict):
-            is_expired_entry["value"] = None
-            is_expired_entry["confidence"] = 0.0
-            normalized["is_expired"] = is_expired_entry
-        return normalized
-    from app.use_cases.trade_license_expiry import parse_trade_license_expiry_date
-
-    parsed_expiry = parse_trade_license_expiry_date(expiry_value)
-    if isinstance(is_expired_entry, dict):
-        is_expired_entry["value"] = bool(parsed_expiry and parsed_expiry < today)
-        is_expired_entry["confidence"] = 1.0 if parsed_expiry is not None else 0.0
-        normalized["is_expired"] = is_expired_entry
+    for field_name in (
+        "trade_license_number",
+        "expiry_date",
+        "company_name",
+        "bank_name",
+        "account_number",
+        "iban",
+        "vat_number",
+        "license_activities",
+        "issue_date",
+        "official_email",
+        "official_mobile",
+    ):
+        field_entry = normalized.get(field_name)
+        if isinstance(field_entry, dict):
+            value = field_entry.get("value")
+            if isinstance(value, str):
+                field_entry["value"] = value.strip() or None
+            normalized[field_name] = field_entry
+    for field_name in ("qr_codes", "verification_urls"):
+        field_entry = normalized.get(field_name)
+        if isinstance(field_entry, dict):
+            value = field_entry.get("value")
+            if value is None:
+                field_entry["value"] = []
+            normalized[field_name] = field_entry
     return normalized
 
 
@@ -243,31 +243,7 @@ def project_llm_extraction_fields(llm_extraction: dict[str, Any] | None) -> dict
     if not isinstance(llm_extraction, dict):
         return {}
     document_type = str(llm_extraction.get("document_type") or "").strip().lower()
-    source_fields = {
-        "trade": {
-            "LicenseNo": "trade_license_number",
-            "ExpiryDate": "expiry_date",
-            "CompanyName": "company_name",
-            "LicenceActivities": "license_activities",
-            "IssueDate": "issue_date",
-            "OfficialEmail": "official_email",
-            "OfficialMobile": "official_mobile",
-        },
-        "vat": {
-            "TaxRegistrationNumber": "vat_number",
-            "LegalNameEnglish": "company_name",
-            "IssueDate": "issue_date",
-            "OfficialEmail": "official_email",
-        },
-        "bank": {
-            "BankName": "bank_name",
-            "AccountName": "company_name",
-            "AccountNumber": "account_number",
-            "IBAN": "iban",
-            "OfficialEmail": "official_email",
-            "OfficialMobile": "official_mobile",
-        },
-    }.get(document_type, {})
+    source_fields = {"trade": {"LicenseNo": "trade_license_number"}}.get(document_type, {})
     projected: dict[str, dict[str, Any]] = {}
     for field_name, llm_field_name in source_fields.items():
         field_result = llm_extraction.get(llm_field_name)
@@ -282,8 +258,8 @@ def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any]
         "verification_urls": build_verification_urls_result(raw_result, file_bytes),
     }
     combined = review_and_extract_with_azure_openai(raw_result, extracted_fields)
-    extras["gpt_review"] = combined.get("gpt_review") or _review_unavailable("Combined review output missing")
-    extras["llm_extraction"] = combined.get("llm_extraction") or _extraction_unavailable("Combined extraction output missing")
+    extras["gpt_review"] = combined.get("gpt_review", _review_failed("Missing gpt_review output"))
+    extras["llm_extraction"] = combined.get("llm_extraction", _extraction_failed("Missing llm_extraction output"))
     return extras
 
 
@@ -320,7 +296,7 @@ def _combined_text(client: AzureOpenAI, raw_result: Any, extracted_fields: dict[
         model=deployment,
         messages=_combined_messages(raw_result, extracted_fields, today),
         temperature=0,
-        max_tokens=900,
+        max_tokens=4000,
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -333,7 +309,7 @@ def _combined_messages(raw_result: Any, extracted_fields: dict[str, Any], today:
             "content": (
                 f"Today: {today.isoformat()}\n\n"
                 f"Extracted fields:\n{json.dumps(extracted_fields, indent=2, ensure_ascii=False)}\n\n"
-                f"Raw document analysis JSON:\n{json.dumps(raw_result, indent=2, ensure_ascii=False)}"
+                f"Raw document analysis content:\n{json.dumps(_raw_result_content_only(raw_result), indent=2, ensure_ascii=False)}"
             ),
         },
     ]
@@ -342,18 +318,20 @@ def _combined_messages(raw_result: Any, extracted_fields: dict[str, Any], today:
 def _combined_system_prompt() -> str:
     return (
         "You are a document intelligence assistant.\n"
-        "Return one JSON object with two keys: gpt_review and llm_extraction.\n\n"
-        "gpt_review: assess only internal consistency. Ignore external authenticity. Do not penalize bilingual text or alternate field names unless values conflict. Check missing mandatory fields, conflicting values, impossible dates, placeholder data, corruption, duplicates, and OCR noise.\n\n"
-        "llm_extraction: extract only what is explicitly present in the raw OCR/document analysis JSON. Do not guess or invent. Preserve values closely. Normalize whitespace. Use ISO dates when possible. Return null for missing/unclear fields. Prefer English values for English-name fields. Compute is_expired only when expiry_date is available.\n\n"
-        "Trade document fields: trade_license_number, expiry_date, company_name, license_activities, issue_date, official_email, official_mobile, qr_codes, verification_urls.\n"
-        "VAT fields: vat_number, company_name, issue_date, official_email.\n"
-        "Bank fields: bank_name, account_number, iban, account_holder/company_name, official_email.\n\n"
+        "You must produce both a document review and a document extraction in a single JSON response.\n\n"
+        "gpt_review: inspect the extracted fields for internal inconsistencies, implausible values, placeholder/test data, date logic errors, formatting that looks machine-altered, or anything that suggests the document is fake, templated, or tampered with. Use only internal consistency and plausibility.\n\n"
+        "llm_extraction: extract the trade document fields exactly as they appear in the raw OCR/document analysis JSON. Do not guess or invent. Trim whitespace only.\n\n"
         "Return ONLY valid JSON. No markdown. No explanation.\n"
         "Use this exact output schema:\n"
         "{\n"
-        '  "gpt_review": {"is_consistent": true|false, "anomalies": ["..."], "plausibility_score": 0.0-1.0, "reasoning": "short explanation"},\n'
+        '  "gpt_review": {\n'
+        '    "is_consistent": true,\n'
+        '    "anomalies": [],\n'
+        '    "plausibility_score": 0.0,\n'
+        '    "reasoning": ""\n'
+        "  },\n"
         '  "llm_extraction": {\n'
-        '    "document_type": "trade|bank|vat|unknown",\n'
+        '    "document_type": "trade|unknown",\n'
         '    "trade_license_number": {"value": null, "confidence": null},\n'
         '    "expiry_date": {"value": null, "confidence": null},\n'
         '    "is_expired": {"value": null, "confidence": null},\n'

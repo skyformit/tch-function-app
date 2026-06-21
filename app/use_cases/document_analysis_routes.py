@@ -7,7 +7,7 @@ from azurefunctions.extensions.http.fastapi import Request
 from app.domain.document_analysis.profiles import DocumentAnalysisProfile
 from app.infrastructure.storage.blob_storage import clean_name as _clean_name
 from app.use_cases.document_analysis_fallbacks import _apply_bank_account_name_fallback, _apply_vat_analysis_fallback
-from app.use_cases.document_analysis_extras import build_trade_license_extras, merge_llm_extraction_into_results, review_and_extract_with_azure_openai
+from app.use_cases.document_analysis_extras import build_trade_license_extras, extract_document_fields_with_azure_openai, merge_llm_extraction_into_results
 from app.use_cases.document_acceptance import build_document_acceptance_response
 from app.use_cases.document_analysis_responses import build_document_analysis_response, build_trade_license_response
 from app.use_cases.document_analysis_runtime import analyze_trade_license_document
@@ -34,9 +34,7 @@ def _route_payload(profile: Optional[DocumentAnalysisProfile], is_trade: bool, o
         response_payload["results"] = merge_llm_extraction_into_results(response_payload.get("results", {}), response_payload["llm_extraction"])
         response_payload["document_acceptance"] = build_document_acceptance_response("trade", response_payload, file_bytes=file_bytes)
         return response_payload
-    combined = review_and_extract_with_azure_openai(outcome.raw_result, response_payload.get("results", {}))
-    response_payload["gpt_review"] = combined.get("gpt_review")
-    response_payload["llm_extraction"] = combined.get("llm_extraction")
+    response_payload["llm_extraction"] = extract_document_fields_with_azure_openai(outcome.raw_result)
     response_payload["results"] = merge_llm_extraction_into_results(response_payload.get("results", {}), response_payload["llm_extraction"])
     if profile and profile.route_name == "ValidateVAT":
         response_payload = _apply_vat_analysis_fallback(response_payload, file_bytes, content_type)
