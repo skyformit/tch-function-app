@@ -26,6 +26,8 @@ class DocumentSettings:
     document_review_openai_api_key: str = _env("DOCUMENT_REVIEW_OPENAI_API_KEY")
     document_review_openai_api_version: str = _env("DOCUMENT_REVIEW_OPENAI_API_VERSION", "2025-04-01-preview")
     document_review_openai_deployment_name: str = _env("DOCUMENT_REVIEW_OPENAI_DEPLOYMENT_NAME")
+    document_review_openai_call_order: str = _env("DOCUMENT_REVIEW_OPENAI_CALL_ORDER", "review_first")
+    document_review_openai_inter_call_delay_seconds: str = _env("DOCUMENT_REVIEW_OPENAI_INTER_CALL_DELAY_SECONDS", "0")
     document_review_openai_system_prompt: str = _env(
         "DOCUMENT_REVIEW_OPENAI_SYSTEM_PROMPT",
         (
@@ -135,6 +137,17 @@ def document_review_openai_api_version() -> str:
 
 def document_review_openai_deployment_name() -> str:
     return settings.document_review_openai_deployment_name
+
+
+def document_review_openai_call_order() -> str:
+    return settings.document_review_openai_call_order
+
+
+def document_review_openai_inter_call_delay_seconds() -> int:
+    try:
+        return max(0, int(settings.document_review_openai_inter_call_delay_seconds))
+    except ValueError:
+        return 0
 
 
 def document_review_openai_system_prompt() -> str:

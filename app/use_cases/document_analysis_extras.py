@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from datetime import date
 from typing import Any, Optional
 
@@ -14,7 +15,9 @@ except ImportError:  # pragma: no cover - dependency may be absent in some local
 from app.core.document_settings import (
     document_review_openai_api_key,
     document_review_openai_api_version,
+    document_review_openai_call_order,
     document_review_openai_deployment_name,
+    document_review_openai_inter_call_delay_seconds,
     document_review_openai_endpoint,
     document_review_openai_system_prompt,
 )
@@ -281,7 +284,19 @@ def build_trade_license_extras(raw_result: Any, extracted_fields: dict[str, Any]
         "qr_codes": build_qr_codes_result(raw_result, file_bytes),
         "verification_urls": build_verification_urls_result(raw_result, file_bytes),
     }
-    gpt_review = review_with_azure_openai(extracted_fields)
-    extras["gpt_review"] = gpt_review
-    extras["llm_extraction"] = extract_document_fields_with_azure_openai(raw_result)
+    call_order = document_review_openai_call_order().strip().lower().replace("-", "_")
+    delay_seconds = document_review_openai_inter_call_delay_seconds()
+    if call_order == "extraction_first":
+        extras["llm_extraction"] = extract_document_fields_with_azure_openai(raw_result)
+        _sleep_between_openai_calls(delay_seconds)
+        extras["gpt_review"] = review_with_azure_openai(extracted_fields)
+    else:
+        extras["gpt_review"] = review_with_azure_openai(extracted_fields)
+        _sleep_between_openai_calls(delay_seconds)
+        extras["llm_extraction"] = extract_document_fields_with_azure_openai(raw_result)
     return extras
+
+
+def _sleep_between_openai_calls(delay_seconds: int) -> None:
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
