@@ -97,6 +97,46 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertNotIn("BusinessName", payload["results"])
         self.assertIn("TradeNameEnglish", payload["results"])
 
+    def test_trade_license_response_drops_location_only_business_name(self) -> None:
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={
+                "contents": [
+                    {
+                        "fields": {
+                            "TradeName": {
+                                "type": "string",
+                                "valueString": "GREEN LIFE EQUIPMENT TRADING",
+                                "confidence": 0.95,
+                            },
+                            "BusinessName": {
+                                "type": "string",
+                                "valueString": "Abu Dhabi",
+                                "confidence": 0.91,
+                            },
+                            "TradeNameEnglish": {
+                                "type": "string",
+                                "valueString": "L.L.C.",
+                                "confidence": 0.88,
+                            },
+                        }
+                    }
+                ]
+            },
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+
+        payload = build_trade_license_response(outcome, ["TradeName", "BusinessName", "TradeNameEnglish"])
+        self.assertEqual(payload["status"], "success")
+        self.assertIn("TradeName", payload["results"])
+        self.assertNotIn("BusinessName", payload["results"])
+        self.assertNotIn("TradeNameEnglish", payload["results"])
+
     def test_vat_fallback_adds_tax_registration_number(self) -> None:
         payload = {
             "status": "success",

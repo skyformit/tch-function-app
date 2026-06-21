@@ -21,6 +21,12 @@ def _is_english_text(value: Any) -> bool:
     return bool(text) and not _contains_arabic_letters(text) and bool(re.search(r"[A-Za-z]", text))
 
 
+def _normalize_alpha_text(value: Any) -> str:
+    text = _normalize_text(value)
+    text = re.sub(r"[^A-Za-z\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
 def _contains_arabic_letters(value: Any) -> bool:
     text = _normalize_text(value)
     return bool(re.search(r"[\u0600-\u06FF]", text))
@@ -54,6 +60,63 @@ def _is_total_area(value: Any) -> bool:
 def _is_parcel_id(value: Any) -> bool:
     text = _normalize_text(value)
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9\-\/]{1,40}", text))
+
+
+_UAE_LOCATION_ONLY_VALUES = {
+    "abu dhabi",
+    "dubai",
+    "sharjah",
+    "ajman",
+    "fujairah",
+    "ras al khaimah",
+    "ras al khaymah",
+    "umm al quwain",
+    "uaq",
+    "uae",
+    "united arab emirates",
+}
+
+_LEGAL_SUFFIX_ONLY_VALUES = {
+    "llc",
+    "l l c",
+    "l.l.c",
+    "l.l.c.",
+    "fze",
+    "fzc",
+    "pjsc",
+    "ltd",
+    "co",
+    "company",
+    "sole proprietorship",
+    "est",
+    "establishment",
+}
+
+
+def _is_location_only(value: Any) -> bool:
+    return _normalize_alpha_text(value) in _UAE_LOCATION_ONLY_VALUES
+
+
+def _is_legal_suffix_only(value: Any) -> bool:
+    return _normalize_alpha_text(value) in _LEGAL_SUFFIX_ONLY_VALUES
+
+
+def _looks_like_trade_name(value: Any) -> bool:
+    text = _normalize_text(value)
+    if not _is_english_text(text):
+        return False
+    if _is_location_only(text) or _is_legal_suffix_only(text):
+        return False
+    return True
+
+
+def _looks_like_business_name(value: Any) -> bool:
+    text = _normalize_text(value)
+    if not _is_english_text(text):
+        return False
+    if _is_location_only(text) or _is_legal_suffix_only(text):
+        return False
+    return True
 
 
 Validator = Callable[[Any], bool]
@@ -111,9 +174,9 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
     },
     validators={
         "CompanyName": _is_english_text,
-        "TradeNameEnglish": _is_english_text,
+        "TradeNameEnglish": _looks_like_trade_name,
         "OperatingName": _is_english_text,
-        "BusinessName": _is_english_text,
+        "BusinessName": _looks_like_business_name,
     },
 )
 
