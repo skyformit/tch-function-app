@@ -2,6 +2,7 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
+from app.infrastructure.document_logo_extraction import extract_logo_presence_from_pdf
 from app.use_cases.document_acceptance import build_document_acceptance_response, evaluate_document_acceptance
 
 
@@ -143,6 +144,48 @@ class DocumentAcceptanceTest(unittest.TestCase):
         self.assertFalse(result.is_expired)
         mock_logo.assert_called_once()
 
+    @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
+    def test_bank_document_scores_logo_only_to_review(self, mock_logo: object) -> None:
+        payload = {
+            "results": {
+                "AccountName": {"value": "CONSTRUCTION MACHINERY CENTER CO. LLC"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
+                "AccountNumber": {"value": "1000078384"},
+                "IBAN": {"value": "AE030230000001000078384"},
+            }
+        }
+
+        result = evaluate_document_acceptance("bank", payload, file_bytes=b"%PDF-1.4")
+        self.assertEqual(result.status, "review")
+        self.assertEqual(result.score, 85)
+        self.assertIn("Logo present.", result.reasons)
+        self.assertNotIn("Expert review contribution:", " ".join(result.reasons))
+        mock_logo.assert_called_once()
+
+    @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
+    def test_bank_document_scores_logo_and_gpt_review_to_approved(self, mock_logo: object) -> None:
+        payload = {
+            "results": {
+                "AccountName": {"value": "CONSTRUCTION MACHINERY CENTER CO. LLC"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
+                "AccountNumber": {"value": "1000078384"},
+                "IBAN": {"value": "AE030230000001000078384"},
+            },
+            "gpt_review": {
+                "is_consistent": True,
+                "anomalies": [],
+                "plausibility_score": 1.0,
+                "reasoning": "Looks consistent.",
+            },
+        }
+
+        result = evaluate_document_acceptance("bank", payload, file_bytes=b"%PDF-1.4")
+        self.assertEqual(result.status, "approved")
+        self.assertEqual(result.score, 100)
+        self.assertIn("Logo present.", result.reasons)
+        self.assertIn("Expert review contribution: +15.", result.reasons)
+        mock_logo.assert_called_once()
+
     @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=False)
     def test_trade_license_reports_logo_absence(self, mock_logo: object) -> None:
         payload = {
@@ -160,6 +203,21 @@ class DocumentAcceptanceTest(unittest.TestCase):
         self.assertEqual(result.expiry_date, "2027-04-06")
         self.assertFalse(result.is_expired)
         mock_logo.assert_called_once()
+
+    @patch("app.infrastructure.document_logo_extraction.fitz.open")
+    def test_logo_detector_scans_all_pages(self, mock_open: object) -> None:
+        first_page = unittest.mock.MagicMock()
+        first_page.rect.height = 100.0
+        first_page.get_images.return_value = []
+        first_page.get_image_rects.return_value = []
+
+        second_page = unittest.mock.MagicMock()
+        second_page.rect.height = 100.0
+        second_page.get_images.return_value = [(1,)]
+        second_page.get_image_rects.return_value = []
+
+        mock_open.return_value = [first_page, second_page]
+        self.assertTrue(extract_logo_presence_from_pdf(b"%PDF-1.4"))
 
     def test_trade_license_rejects_expired_document(self) -> None:
         payload = {
@@ -250,8 +308,33 @@ class DocumentAcceptanceTest(unittest.TestCase):
 
         result = evaluate_document_acceptance("bank", payload)
         self.assertEqual(result.status, "rejected")
-        self.assertEqual(result.score, 60)
+        self.assertEqual(result.score, 75)
         self.assertEqual(result.missing_fields, [])
+
+    @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
+    def test_bank_scores_logo_without_qr_or_verification_rules(self, mock_logo: object) -> None:
+        payload = {"results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}}
+
+        result = evaluate_document_acceptance("bank", payload, file_bytes=b"%PDF-1.4")
+        self.assertEqual(result.status, "review")
+        self.assertEqual(result.score, 85)
+        self.assertEqual(result.missing_fields, [])
+        self.assertEqual(result.reasons, ["Logo present."])
+        mock_logo.assert_called_once()
+
+    @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=False)
+    def test_bank_ignores_qr_and_verification_signals(self, mock_logo: object) -> None:
+        payload = {
+            "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}},
+            "qr_codes": {"value": ["https://example.com/qr"]},
+            "verification_urls": {"value": ["https://example.com/verify"]},
+        }
+
+        result = evaluate_document_acceptance("bank", payload, file_bytes=b"%PDF-1.4")
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 75)
+        self.assertEqual(result.reasons, ["Logo not found."])
+        mock_logo.assert_called_once()
 
     def test_bank_rejects_missing_bank_name(self) -> None:
         payload = {"results": {}}

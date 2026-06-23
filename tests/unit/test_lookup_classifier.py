@@ -34,6 +34,10 @@ class LookupClassifierTest(unittest.TestCase):
         self.assertEqual(result["label"], "company_name")
         self.assertGreater(result["confidence"], 0.9)
 
+    def test_general_trading_phrase_is_not_auto_company(self) -> None:
+        result = classify_lookup_input("abc general trading")
+        self.assertEqual(result["label"], "unknown")
+
     def test_prompt_contains_expected_labels(self) -> None:
         self.assertIn("company_name", LOOKUP_CLASSIFICATION_PROMPT)
         self.assertIn("person_name", LOOKUP_CLASSIFICATION_PROMPT)

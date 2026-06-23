@@ -33,11 +33,18 @@ COMPANY_HINTS = (
     "co.",
     "co ",
     "group",
-    "trading",
     "est",
     "est.",
     "branch",
     "holding",
+)
+
+BUSINESS_ONLY_HINTS = (
+    "trading",
+    "industries",
+    "industrial",
+    "enterprise",
+    "enterprises",
 )
 
 LICENSE_PATTERN = re.compile(r"^(?:[a-z]{1,5}-)?\d{3,}(?:\s+\d{3,})*$", re.IGNORECASE)
@@ -61,7 +68,10 @@ def _looks_like_license(text: str) -> bool:
 
 
 def _looks_like_person(text: str) -> bool:
+    lowered = text.lower()
     if not text or _looks_like_company(text) or _looks_like_license(text):
+        return False
+    if any(hint in lowered for hint in BUSINESS_ONLY_HINTS):
         return False
     if any(char.isdigit() for char in text):
         return False
@@ -91,6 +101,8 @@ def classify_lookup_input(text: Any) -> dict[str, Any]:
         return {"label": "trade_license_number", "confidence": 0.99, "reason": "Matches a license-like number pattern."}
     if _looks_like_company(normalized_text):
         return {"label": "company_name", "confidence": 0.98, "reason": "Contains company or business suffix keywords."}
+    if any(hint in normalized_text.lower() for hint in BUSINESS_ONLY_HINTS):
+        return {"label": "unknown", "confidence": 0.55, "reason": "Looks like a business phrase but lacks a clear company suffix or label."}
     if _looks_like_person(normalized_text):
         return {"label": "person_name", "confidence": 0.9, "reason": "Looks like a personal name without company keywords."}
     if len(normalized_text.split()) >= 2 and not any(char.isdigit() for char in normalized_text):

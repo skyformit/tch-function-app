@@ -12,6 +12,7 @@ openai
 numpy
 Pillow
 opencv-python-headless
+zxing-cpp
 python-multipart
 pypdf
 requests

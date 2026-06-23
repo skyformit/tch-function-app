@@ -1,10 +1,18 @@
 import unittest
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.domain.document_analysis.profiles import BANK_PROFILE, VAT_PROFILE
 from app.infrastructure.document_qr_extraction import _extract_urls_from_text
-from app.use_cases.document_analysis_extras import build_trade_license_extras, extract_qr_codes, _raw_result_content_only, project_llm_extraction_fields
+from app.use_cases.document_analysis_extras import (
+    _combined_messages,
+    _extraction_messages,
+    _raw_result_content_only,
+    build_trade_license_extras,
+    extract_qr_codes,
+    project_llm_extraction_fields,
+)
 from app.use_cases.document_analysis import (
     AnalysisOutcome,
     _apply_bank_account_name_fallback,
@@ -12,7 +20,8 @@ from app.use_cases.document_analysis import (
     build_document_analysis_response,
     build_trade_license_response,
 )
-from app.use_cases.document_analysis_routes import _route_payload
+from app.use_cases.document_analysis_routes import _remember_approved_trade_document, _route_payload
+from app.use_cases.general_bot_memory import clear_trusted_trade_document, get_trusted_trade_document
 from app.use_cases.upload_blob import _with_success_metadata
 
 
@@ -167,6 +176,107 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
 
+    def test_trade_license_response_normalizes_company_name_examples(self) -> None:
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={
+                "contents": [
+                    {
+                        "fields": {
+                            "CompanyName": {
+                                "type": "string",
+                                "valueString": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C)",
+                                "confidence": 0.99,
+                            },
+                            "TradeName": {
+                                "type": "string",
+                                "valueString": "GREEN LIFE EQUIPMENT TRADING - SOLE PROPRIETORSHIP L.L.C.",
+                                "confidence": 0.96,
+                            },
+                            "TradeNameEnglish": {
+                                "type": "string",
+                                "valueString": "GREEN LIFE EQUIPMENT TRADING",
+                                "confidence": 0.95,
+                            },
+                        }
+                    }
+                ]
+            },
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+
+        payload = build_trade_license_response(outcome, ["CompanyName", "TradeName", "TradeNameEnglish"])
+        self.assertEqual(payload["results"]["CompanyName"]["value"], "CONSTRUCTION MACHINERY CENTER")
+        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
+        self.assertEqual(payload["results"]["TradeNameEnglish"]["value"], "GREEN LIFE EQUIPMENT TRADING")
+
+    def test_trade_license_response_rejects_fragment_company_name(self) -> None:
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={
+                "contents": [
+                    {
+                        "fields": {
+                            "CompanyName": {
+                                "type": "string",
+                                "valueString": "INDUSTRIES L.L.C",
+                                "confidence": 0.34,
+                            },
+                            "OperatingName": {
+                                "type": "string",
+                                "valueString": "ASSA ABLOY MIDDLE EAST",
+                                "confidence": 0.87,
+                            },
+                        }
+                    }
+                ]
+            },
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+
+        payload = build_trade_license_response(outcome, ["CompanyName", "OperatingName"])
+        self.assertEqual(payload["status"], "success")
+        self.assertNotIn("CompanyName", payload["results"])
+        self.assertIn("OperatingName", payload["results"])
+
+    def test_trade_license_response_rejects_one_word_prefix_before_suffix(self) -> None:
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={
+                "contents": [
+                    {
+                        "fields": {
+                            "CompanyName": {
+                                "type": "string",
+                                "valueString": "CO.(L.L.C)",
+                                "confidence": 0.34,
+                            }
+                        }
+                    }
+                ]
+            },
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="trade.pdf",
+            container="bronze",
+            blob_name="trade.pdf",
+            upload_skipped=True,
+        )
+
+        payload = build_trade_license_response(outcome, ["CompanyName"])
+        self.assertEqual(payload["status"], "fail")
+        self.assertNotIn("CompanyName", payload["results"])
+
     def test_trade_license_response_strips_additional_legal_suffix_terms(self) -> None:
         outcome = AnalysisOutcome(
             provider="document_intelligence",
@@ -291,11 +401,57 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
                 "iban": {"value": "AE030230000001000078384", "confidence": 0.99},
             }
         )
+        bank_certificate_projection = project_llm_extraction_fields(
+            {
+                "document_type": "bank_certificate",
+                "bank_name": {"value": "Commercial Bank of Dubai", "confidence": 0.99},
+                "account_number": {"value": "1000078384", "confidence": 0.99},
+            }
+        )
+        bank_offer_projection = project_llm_extraction_fields(
+            {
+                "document_type": "bank_offer",
+                "bank_name": {"value": "Commercial Bank of Dubai", "confidence": 0.99},
+                "account_number": {"value": "1000078384", "confidence": 0.99},
+            }
+        )
+        trade_projection = project_llm_extraction_fields(
+            {
+                "document_type": "trade",
+                "operating_name": {"value": "ASSA ABLOY MIDDLE EASR INDUSTRIES LLC", "confidence": 0.87},
+            }
+        )
         self.assertEqual(vat_projection["TaxRegistrationNumber"]["value"], "100042630200003")
         self.assertEqual(vat_projection["LegalNameEnglish"]["value"], "CONSTRUCTION MACHINERY CENTER CO.(L.L.C)")
         self.assertEqual(bank_projection["BankName"]["value"], "Commercial Bank of Dubai")
         self.assertEqual(bank_projection["AccountNumber"]["value"], "1000078384")
         self.assertEqual(bank_projection["IBAN"]["value"], "AE030230000001000078384")
+        self.assertEqual(bank_certificate_projection["BankName"]["value"], "Commercial Bank of Dubai")
+        self.assertEqual(bank_offer_projection["BankName"]["value"], "Commercial Bank of Dubai")
+        self.assertEqual(trade_projection["OperatingName"]["value"], "ASSA ABLOY MIDDLE EASR INDUSTRIES LLC")
+
+    def test_trade_merge_llm_operating_name_mirrors_trade_name(self) -> None:
+        llm_extraction = {
+            "document_type": "trade",
+            "operating_name": {"value": "ASSA ABLOY MIDDLE EASR INDUSTRIES LLC", "confidence": 0.87},
+        }
+        from app.use_cases.document_analysis_extras import merge_llm_extraction_into_results
+
+        result = merge_llm_extraction_into_results(
+            {"TradeName": {"value": "ABC", "confidence": 0.9}},
+            llm_extraction,
+        )
+        self.assertEqual(result["TradeName"]["value"], "ABC")
+
+    def test_trade_merge_llm_operating_name_fills_missing_trade_name(self) -> None:
+        llm_extraction = {
+            "document_type": "trade",
+            "operating_name": {"value": "ASSA ABLOY MIDDLE EASR INDUSTRIES LLC", "confidence": 0.87},
+        }
+        from app.use_cases.document_analysis_extras import merge_llm_extraction_into_results
+
+        result = merge_llm_extraction_into_results({}, llm_extraction)
+        self.assertEqual(result["TradeName"]["value"], "ASSA ABLOY MIDDLE EASR INDUSTRIES LLC")
 
     @patch(
         "app.use_cases.document_analysis_extras.review_and_extract_with_azure_openai",
@@ -309,6 +465,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             {"contents": [{"barcodes": [{"kind": "qr", "value": "https://example.com"}]}]},
             {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}},
         )
+        self.assertEqual(extras["qr_payloads"]["value"], ["https://example.com"])
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com"])
         self.assertEqual(extras["verification_urls"]["value"], ["https://example.com"])
         self.assertIn("gpt_review", extras)
@@ -320,6 +477,28 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
     def test_qr_url_fallback_normalizes_www_links(self) -> None:
         text = "To verify the license visit www.adra.gov.ae for details."
         self.assertEqual(_extract_urls_from_text(text), ["https://www.adra.gov.ae"])
+
+    def test_document_extraction_messages_include_context_hint(self) -> None:
+        messages = _extraction_messages(
+            {"content": "raw ocr"},
+            today=date(2026, 6, 23),
+            context_hint="conversation_id: conv-1\ncompany_name: Eurocon Building Industries FZE",
+        )
+        self.assertEqual(len(messages), 2)
+        self.assertIn("Conversation/document context", messages[1]["content"])
+        self.assertIn("conversation_id: conv-1", messages[1]["content"])
+        self.assertIn("company_name: Eurocon Building Industries FZE", messages[1]["content"])
+
+    def test_combined_messages_include_context_hint(self) -> None:
+        messages = _combined_messages(
+            {"content": "raw ocr"},
+            {"TradeNameEnglish": {"value": "Eurocon Building Industries FZE", "confidence": 0.9}},
+            today=date(2026, 6, 23),
+            context_hint="conversation_id: conv-1\ncompany_name: Eurocon Building Industries FZE",
+        )
+        self.assertEqual(len(messages), 2)
+        self.assertIn("Conversation/document context", messages[1]["content"])
+        self.assertIn("company_name: Eurocon Building Industries FZE", messages[1]["content"])
 
     @patch(
         "app.use_cases.document_analysis_extras.review_and_extract_with_azure_openai",
@@ -343,12 +522,35 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             "llm_extraction": {"document_type": "unknown"},
         },
     )
+    @patch("app.use_cases.document_analysis_extras.extract_qr_codes", return_value=["Full Arabic legal name:فيشير فيكسنج ش ذ م م\n Full English legal name: Fischer Fixing LLC\n TRN: 100036334900003"])
+    def test_trade_license_extras_promotes_non_url_qr_payload_to_verification_urls(self, mock_qr_codes, mock_combined) -> None:
+        extras = build_trade_license_extras({}, {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}})
+        self.assertEqual(
+            extras["qr_payloads"]["value"],
+            ["Full Arabic legal name:فيشير فيكسنج ش ذ م م\n Full English legal name: Fischer Fixing LLC\n TRN: 100036334900003"],
+        )
+        self.assertEqual(
+            extras["verification_urls"]["value"],
+            ["Full Arabic legal name:فيشير فيكسنج ش ذ م م\n Full English legal name: Fischer Fixing LLC\n TRN: 100036334900003"],
+        )
+        self.assertEqual(extras["verification_urls"]["confidence"], 0.95)
+        self.assertGreaterEqual(mock_qr_codes.call_count, 1)
+        mock_combined.assert_called_once()
+
+    @patch(
+        "app.use_cases.document_analysis_extras.review_and_extract_with_azure_openai",
+        return_value={
+            "gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 1.0, "reasoning": "Looks consistent."},
+            "llm_extraction": {"document_type": "unknown"},
+        },
+    )
     @patch("app.use_cases.document_analysis_extras.extract_qr_codes_from_pdf", return_value=["https://example.com/qr-from-pdf"])
     def test_trade_license_extras_fallback_to_pdf_bytes_for_qr(self, mock_qr_from_pdf, mock_combined) -> None:
         extras = build_trade_license_extras({}, {"TradeNameEnglish": {"value": "ABC", "confidence": 0.9}}, file_bytes=b"pdf-bytes")
+        self.assertEqual(extras["qr_payloads"]["value"], ["https://example.com/qr-from-pdf"])
         self.assertEqual(extras["qr_codes"]["value"], ["https://example.com/qr-from-pdf"])
         self.assertEqual(extras["qr_codes"]["confidence"], 0.95)
-        mock_qr_from_pdf.assert_called_once_with(b"pdf-bytes")
+        self.assertGreaterEqual(mock_qr_from_pdf.call_count, 1)
         mock_combined.assert_called_once()
 
     @patch(
@@ -418,14 +620,59 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(payload["document_acceptance"]["score"], 100)
         self.assertEqual(payload["document_acceptance"]["acceptable"], True)
         self.assertEqual(payload["raw_results"], "Company Name: CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)")
+        self.assertIn("company_match", payload)
+        self.assertEqual(payload["company_match"]["match_status"], "exact")
+        self.assertEqual(payload["company_match"]["similarity_percent"], 100.0)
         self.assertIn("gpt_review", payload)
         self.assertEqual(payload["gpt_review"]["is_consistent"], True)
         mock_extras.assert_called_once()
         mock_logo.assert_called_once()
         mock_gpt_review.assert_called_once()
 
+    def test_approved_trade_document_is_cached_for_follow_up_questions(self) -> None:
+        conversation_id = "conv-trade-cache"
+        clear_trusted_trade_document(conversation_id)
+        response_payload = {
+            "status": "success",
+            "score": 100,
+            "results": {
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER", "confidence": 0.98},
+                "LicenseNo": {"value": "206558", "confidence": 0.99},
+                "ExpiryDate": {"value": "06/04/2027", "confidence": 0.99},
+                "LicenceActivities": {"value": "Construction Equipment Trading", "confidence": 0.99},
+            },
+            "company_match": {
+                "matched_company_name": "CONSTRUCTION MACHINERY CENTER",
+                "requested_company_name": "CONSTRUCTION MACHINERY CENTER",
+            },
+            "document_acceptance": {
+                "document_type": "trade",
+                "status": "approved",
+                "score": 100,
+                "missing_fields": [],
+                "reasons": ["QR code present."],
+                "acceptable": True,
+                "expiry_date": "2027-04-06",
+                "is_expired": False,
+            },
+            "gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 1.0, "reasoning": "Looks good."},
+            "qr_codes": {"value": ["https://example.com/qr"], "confidence": 0.95},
+            "verification_urls": {"value": ["https://example.com/verify"], "confidence": 0.95},
+            "logo": {"value": True, "confidence": 1.0},
+        }
+
+        _remember_approved_trade_document(conversation_id, response_payload)
+
+        stored = get_trusted_trade_document(conversation_id)
+        self.assertEqual(stored["document_type"], "trade")
+        self.assertEqual(stored["company_name"], "CONSTRUCTION MACHINERY CENTER")
+        self.assertEqual(stored["trade_license_number"], "206558")
+        self.assertEqual(stored["expiry_date"], "2027-04-06")
+        self.assertEqual(stored["licensed_activities"], "Construction Equipment Trading")
+        self.assertEqual(stored["document_acceptance"]["status"], "approved")
+
     @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
-    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "company_name": {"value": "GREEN LIFE EQUIPMENT TRADING", "confidence": 0.95}, "vat_number": {"value": "100382292900003", "confidence": 0.99}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
     def test_vat_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review) -> None:
@@ -444,6 +691,9 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["TaxRegistrationNumber", "LegalNameEnglish"])
         self.assertIn("llm_extraction", payload)
         self.assertEqual(payload["llm_extraction"]["document_type"], "vat")
+        self.assertIn("company_match", payload)
+        self.assertEqual(payload["company_match"]["match_status"], "exact")
+        self.assertEqual(payload["company_match"]["similarity_percent"], 100.0)
         self.assertIn("gpt_review", payload)
         self.assertEqual(payload["gpt_review"]["is_consistent"], True)
         mock_llm_extraction.assert_called_once()
@@ -451,8 +701,61 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         mock_fallback.assert_called_once()
         mock_gpt_review.assert_called_once()
 
+    @patch("app.use_cases.document_analysis_routes.extract_logo_presence_from_pdf", return_value=True)
+    @patch("app.use_cases.document_analysis_routes.build_verification_urls_result", return_value={"value": ["https://example.com/verify"], "confidence": 0.95})
+    @patch("app.use_cases.document_analysis_routes.build_qr_codes_result", return_value={"value": ["https://example.com/qr"], "confidence": 0.95})
     @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
-    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
+    @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
+    @patch("app.use_cases.document_analysis_routes.build_qr_payloads_result", return_value={"value": ["https://example.com/qr-payload"], "confidence": 0.95})
+    def test_vat_route_payload_includes_document_signals(self, mock_qr_payloads, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review, mock_qr, mock_urls, mock_logo) -> None:
+        mock_build_response.return_value = {
+            "status": "success",
+            "score": 0.91,
+            "results": {
+                "TaxRegistrationNumber": {"value": "100382292900003"},
+                "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+            },
+            "source": "document_intelligence",
+            "origin": "document_intelligence",
+            "source_type": "document_intelligence",
+        }
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={"contents": [{"fields": {}}]},
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="vat.pdf",
+            container="bronze",
+            blob_name="vat.pdf",
+            upload_skipped=True,
+        )
+        profile = SimpleNamespace(route_name="ValidateVAT")
+        payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["TaxRegistrationNumber", "LegalNameEnglish"])
+        self.assertIn("qr_codes", payload)
+        self.assertIn("qr_payloads", payload)
+        self.assertIn("verification_urls", payload)
+        self.assertIn("logo", payload)
+        self.assertEqual(payload["qr_payloads"]["value"], ["https://example.com/qr-payload"])
+        self.assertEqual(payload["qr_codes"]["value"], ["https://example.com/qr"])
+        self.assertEqual(payload["verification_urls"]["value"], ["https://example.com/verify"])
+        self.assertEqual(payload["logo"]["value"], True)
+        self.assertIn("document_acceptance", payload)
+        self.assertEqual(payload["document_acceptance"]["status"], "approved")
+        self.assertTrue(payload["document_acceptance"]["acceptable"])
+        self.assertEqual(payload["document_acceptance"]["score"], 100)
+        mock_llm_extraction.assert_called_once()
+        mock_build_response.assert_called_once()
+        mock_fallback.assert_called_once()
+        mock_gpt_review.assert_called_once()
+        mock_qr.assert_called_once()
+        mock_qr_payloads.assert_called_once()
+        mock_urls.assert_called_once()
+        mock_logo.assert_called_once()
+
+    @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "company_name": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC", "confidence": 0.99}, "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
     def test_bank_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review) -> None:
@@ -471,12 +774,67 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["BankName", "AccountName"])
         self.assertIn("llm_extraction", payload)
         self.assertEqual(payload["llm_extraction"]["document_type"], "bank")
+        self.assertIn("company_match", payload)
+        self.assertEqual(payload["company_match"]["match_status"], "exact")
+        self.assertEqual(payload["company_match"]["similarity_percent"], 100.0)
         self.assertIn("gpt_review", payload)
         self.assertEqual(payload["gpt_review"]["is_consistent"], True)
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
         mock_gpt_review.assert_called_once()
+
+    @patch("app.use_cases.document_analysis_routes.extract_logo_presence_from_pdf", return_value=True)
+    @patch("app.use_cases.document_analysis_routes.build_verification_urls_result", return_value={"value": ["https://example.com/verify"], "confidence": 0.95})
+    @patch("app.use_cases.document_analysis_routes.build_qr_codes_result", return_value={"value": ["https://example.com/qr"], "confidence": 0.95})
+    @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
+    @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "bank", "company_name": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC", "confidence": 0.99}, "bank_name": {"value": "ARABBANK", "confidence": 0.99}})
+    @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
+    @patch("app.use_cases.document_analysis_routes._apply_bank_account_name_fallback", side_effect=lambda payload, *_args: payload)
+    @patch("app.use_cases.document_analysis_routes.build_qr_payloads_result", return_value={"value": ["https://example.com/qr-payload"], "confidence": 0.95})
+    def test_bank_route_payload_includes_document_signals(self, mock_qr_payloads, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review, mock_qr, mock_urls, mock_logo) -> None:
+        mock_build_response.return_value = {
+            "status": "success",
+            "score": 0.93,
+            "results": {
+                "AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"},
+            },
+            "source": "document_intelligence",
+            "origin": "document_intelligence",
+            "source_type": "document_intelligence",
+        }
+        outcome = AnalysisOutcome(
+            provider="document_intelligence",
+            raw_result={"contents": [{"fields": {}}]},
+            model_id="prebuilt-layout",
+            api_version="2025-11-01",
+            file_name="bank.pdf",
+            container="bronze",
+            blob_name="bank.pdf",
+            upload_skipped=True,
+        )
+        profile = SimpleNamespace(route_name="ValidateBankDocument")
+        payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["BankName", "AccountName"])
+        self.assertIn("qr_codes", payload)
+        self.assertIn("qr_payloads", payload)
+        self.assertIn("verification_urls", payload)
+        self.assertIn("logo", payload)
+        self.assertEqual(payload["qr_payloads"]["value"], ["https://example.com/qr-payload"])
+        self.assertEqual(payload["qr_codes"]["value"], ["https://example.com/qr"])
+        self.assertEqual(payload["verification_urls"]["value"], ["https://example.com/verify"])
+        self.assertEqual(payload["logo"]["value"], True)
+        self.assertIn("document_acceptance", payload)
+        self.assertEqual(payload["document_acceptance"]["status"], "review")
+        self.assertFalse(payload["document_acceptance"]["acceptable"])
+        self.assertEqual(payload["document_acceptance"]["score"], 89)
+        mock_llm_extraction.assert_called_once()
+        mock_build_response.assert_called_once()
+        mock_fallback.assert_called_once()
+        mock_gpt_review.assert_called_once()
+        mock_qr.assert_called_once()
+        mock_qr_payloads.assert_called_once()
+        mock_urls.assert_called_once()
+        mock_logo.assert_called_once()
 
     @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "vat_number": {"value": "100382292900003", "confidence": 0.99}})
@@ -534,9 +892,9 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         profile = SimpleNamespace(route_name="ValidateBankDocument")
         payload = _route_payload(profile, False, outcome, b"%PDF-1.4", "application/pdf", ["BankName", "AccountName"])
         self.assertIn("document_acceptance", payload)
-        self.assertEqual(payload["document_acceptance"]["status"], "rejected")
+        self.assertEqual(payload["document_acceptance"]["status"], "review")
         self.assertFalse(payload["document_acceptance"]["acceptable"])
-        self.assertEqual(payload["document_acceptance"]["score"], 74)
+        self.assertEqual(payload["document_acceptance"]["score"], 89)
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()

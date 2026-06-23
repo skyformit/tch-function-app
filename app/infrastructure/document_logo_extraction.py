@@ -18,10 +18,12 @@ def extract_logo_presence_from_pdf(file_bytes: bytes) -> bool:
     if len(document) == 0:
         return False
     try:
-        first_page = document[0]
-        return _page_has_top_image(first_page)
+        for page in document:
+            if _page_has_top_image(page) or _page_has_any_image(page):
+                return True
     except Exception:
         return False
+    return False
 
 
 def _page_has_top_image(page: Any) -> bool:
@@ -43,3 +45,11 @@ def _page_has_top_image(page: Any) -> bool:
             if float(rect.y1) <= top_threshold:
                 return True
     return False
+
+
+def _page_has_any_image(page: Any) -> bool:
+    try:
+        images = page.get_images(full=True) or []
+    except Exception:
+        return False
+    return bool(images)

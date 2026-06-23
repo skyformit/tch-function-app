@@ -19,6 +19,7 @@ Return only valid JSON with this shape:
 {
   "route": "tbms|chat|clarify",
   "lookup_type": "company_name|trade_license_number|person_name|unknown",
+  "document_type": "trade|vat|bank_certificate|bank_offer|bank|unknown",
   "vendor_name": "string or empty",
   "license_no": "string or empty",
   "confidence": 0.0,
@@ -30,6 +31,9 @@ Rules:
 - Prefer tbms for explicit trade license/license no/license number/licence no inputs.
 - Prefer tbms when the message contains a clear UAE vendor lookup intent plus a numeric license value, even if the wording is informal.
 - If both company name and license number are present, extract both.
+- If the user mentions a document or upload, also classify document_type as trade, vat, bank_certificate, bank_offer, bank, or unknown.
+- Use bank_certificate for bank letters / certificates / statements.
+- Use bank_offer for bank offer letters or offer documents.
 - Use clarify only when the user clearly wants a lookup but the input is incomplete or ambiguous.
 - Use chat for greetings, identity questions, capability questions, and all unrelated conversations.
 - Do not invent company names or license numbers.
@@ -48,6 +52,21 @@ _NUMERIC_LICENSE_PATTERN = re.compile(r"\b([A-Z]{1,5}-\d{3,}(?:\s+\d{3,})*|\d{4,
 
 def _normalize_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _normalize_document_type(value: Any) -> str:
+    normalized = _normalize_text(value).lower().replace("_", " ").replace("-", " ")
+    if normalized in {"trade", "trade license", "tradelicense", "trade licence", "trade license document"}:
+        return "trade"
+    if normalized in {"vat", "vat document", "tax", "tax document"}:
+        return "vat"
+    if normalized in {"bank", "bank letter", "bank document", "bank proof", "bank certificate", "bank offer"}:
+        return "bank"
+    if normalized in {"bank_certificate", "bank certificate", "bank cert", "bank statement"}:
+        return "bank_certificate"
+    if normalized in {"bank_offer", "bank offer", "offer letter", "offer document"}:
+        return "bank_offer"
+    return normalized or "unknown"
 
 
 def _extract_json_payload(text: str) -> dict[str, Any]:
@@ -71,6 +90,7 @@ def _extract_json_payload(text: str) -> dict[str, Any]:
 def _normalize_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
     route = str(decision.get("route") or "chat").strip().lower()
     lookup_type = str(decision.get("lookup_type") or "unknown").strip().lower()
+    document_type = _normalize_document_type(decision.get("document_type"))
     vendor_name = _normalize_text(decision.get("vendor_name"))
     license_no = _normalize_text(decision.get("license_no"))
     confidence = decision.get("confidence", 0.0)
@@ -86,6 +106,7 @@ def _normalize_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
     return {
         "route": route,
         "lookup_type": lookup_type,
+        "document_type": document_type,
         "vendor_name": vendor_name,
         "license_no": license_no,
         "confidence": confidence,
@@ -102,6 +123,7 @@ def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
     route = decision.get("route")
     vendor_name = _normalize_text(decision.get("vendor_name"))
     license_no = _normalize_text(decision.get("license_no"))
+    document_type = _normalize_document_type(decision.get("document_type"))
     confidence = decision.get("confidence", 0.0)
     license_candidate = _extract_license_candidate(text)
     if route == "tbms" and not vendor_name and not license_no:
@@ -109,6 +131,7 @@ def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
             return {
                 "route": "tbms",
                 "lookup_type": "trade_license_number",
+                "document_type": document_type,
                 "vendor_name": "",
                 "license_no": license_candidate,
                 "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
@@ -117,6 +140,7 @@ def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
         return {
             "route": "clarify",
             "lookup_type": "unknown",
+            "document_type": document_type,
             "vendor_name": "",
             "license_no": "",
             "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
@@ -126,6 +150,7 @@ def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
         return {
             "route": "clarify",
             "lookup_type": "unknown",
+            "document_type": document_type,
             "vendor_name": "",
             "license_no": "",
             "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
@@ -141,6 +166,7 @@ def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
         return {
             "route": "tbms",
             "lookup_type": "trade_license_number",
+            "document_type": document_type,
             "vendor_name": vendor_name,
             "license_no": license_candidate,
             "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
@@ -171,6 +197,7 @@ async def classify_lookup_route(text: str, config: dict) -> dict[str, Any]:
         return {
             "route": "clarify",
             "lookup_type": "unknown",
+            "document_type": "unknown",
             "vendor_name": "",
             "license_no": "",
             "confidence": 0.0,
@@ -181,6 +208,7 @@ async def classify_lookup_route(text: str, config: dict) -> dict[str, Any]:
         return {
             "route": "clarify",
             "lookup_type": "unknown",
+            "document_type": "unknown",
             "vendor_name": "",
             "license_no": "",
             "confidence": 0.0,

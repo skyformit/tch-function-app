@@ -143,10 +143,112 @@ def _normalize_trade_name_value(value: Any) -> str:
     text = _normalize_text(value)
     if not text:
         return text
+    stripped = _strip_trailing_legal_suffixes(text)
+    if stripped:
+        return stripped
     parts = re.split(r"\s*[-–—]\s*", text, maxsplit=1)
     if len(parts) == 2 and (_is_legal_suffix_only(parts[1]) or _is_legal_entity_suffix(parts[1])):
         return parts[0].strip()
     return text
+
+
+def _strip_trailing_legal_suffixes(value: Any) -> str:
+    text = _normalize_text(value)
+    if not text:
+        return ""
+    original_tokens = re.findall(r"[A-Za-z]+", text)
+    if not original_tokens:
+        return ""
+    normalized_tokens = [token.lower() for token in original_tokens]
+    suffix_sequences = [
+        ("limited", "liability", "company"),
+        ("sole", "proprietorship"),
+        ("sole", "proprietor"),
+        ("proprietorship",),
+        ("establishment",),
+        ("branch",),
+        ("llc",),
+        ("l", "l", "c"),
+        ("fze",),
+        ("fzc",),
+        ("pjsc",),
+        ("ltd",),
+        ("co",),
+        ("company",),
+        ("est",),
+    ]
+    while normalized_tokens:
+        matched = False
+        for suffix in suffix_sequences:
+            if len(normalized_tokens) >= len(suffix) and tuple(normalized_tokens[-len(suffix):]) == suffix:
+                normalized_tokens = normalized_tokens[:-len(suffix)]
+                matched = True
+                break
+        if not matched:
+            break
+    if not normalized_tokens:
+        return ""
+    candidate = " ".join(original_tokens[: len(normalized_tokens)]).strip()
+    if _looks_like_company_fragment(candidate):
+        return candidate
+    return ""
+
+
+def _contains_legal_suffix_marker(value: Any) -> bool:
+    text = _normalize_text(value)
+    if not text:
+        return False
+    normalized_tokens = [token.lower() for token in re.findall(r"[A-Za-z]+", text)]
+    if not normalized_tokens:
+        return False
+    suffix_sequences = [
+        ("limited", "liability", "company"),
+        ("sole", "proprietorship"),
+        ("sole", "proprietor"),
+        ("proprietorship",),
+        ("establishment",),
+        ("branch",),
+        ("llc",),
+        ("l", "l", "c"),
+        ("fze",),
+        ("fzc",),
+        ("pjsc",),
+        ("ltd",),
+        ("co",),
+        ("company",),
+        ("est",),
+    ]
+    for suffix in suffix_sequences:
+        if len(normalized_tokens) >= len(suffix) and tuple(normalized_tokens[-len(suffix):]) == suffix:
+            return True
+    return False
+
+
+def _looks_like_company_fragment(value: Any) -> bool:
+    text = _normalize_text(value)
+    if not text:
+        return False
+    if _is_location_only(text) or _is_legal_suffix_only(text):
+        return False
+    if _contains_arabic_letters(text):
+        return False
+    if not _is_english_text(text):
+        return False
+    return len(text.split()) >= 2
+
+
+def _is_complete_company_name(value: Any) -> bool:
+    text = _normalize_text(value)
+    if not text:
+        return False
+    stripped = _strip_trailing_legal_suffixes(text)
+    if stripped:
+        candidate = stripped
+    elif _contains_legal_suffix_marker(text):
+        return False
+    else:
+        candidate = text
+    return _looks_like_company_fragment(candidate)
 
 
 Validator = Callable[[Any], bool]
@@ -212,10 +314,11 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
         "OfficialMobile": ["Mobile", "Phone"],
     },
     validators={
-        "CompanyName": _is_english_text,
-        "TradeNameEnglish": _looks_like_trade_name,
-        "OperatingName": _is_english_text,
-        "BusinessName": _looks_like_business_name,
+        "CompanyName": _is_complete_company_name,
+        "TradeName": _is_complete_company_name,
+        "TradeNameEnglish": _is_complete_company_name,
+        "OperatingName": _is_complete_company_name,
+        "BusinessName": _is_complete_company_name,
     },
 )
 

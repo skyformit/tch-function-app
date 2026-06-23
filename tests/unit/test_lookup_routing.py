@@ -8,6 +8,9 @@ class LookupRoutingPromptTest(unittest.TestCase):
         self.assertIn("tbms", LOOKUP_ROUTING_PROMPT)
         self.assertIn("chat", LOOKUP_ROUTING_PROMPT)
         self.assertIn("clarify", LOOKUP_ROUTING_PROMPT)
+        self.assertIn("document_type", LOOKUP_ROUTING_PROMPT)
+        self.assertIn("bank_certificate", LOOKUP_ROUTING_PROMPT)
+        self.assertIn("bank_offer", LOOKUP_ROUTING_PROMPT)
         self.assertIn("my trade license number is 206558", LOOKUP_ROUTING_PROMPT)
         self.assertIn("vendor name Abdul Jaleel Al Saadi Trading LLC", LOOKUP_ROUTING_PROMPT)
         self.assertIn("my number is 206558", LOOKUP_ROUTING_PROMPT)
@@ -37,6 +40,14 @@ class LookupRoutingPromptTest(unittest.TestCase):
         self.assertEqual(decision["route"], "tbms")
         self.assertEqual(decision["lookup_type"], "trade_license_number")
         self.assertEqual(decision["license_no"], "206558")
+
+    def test_document_type_preserves_bank_subtypes(self) -> None:
+        decision = _validate_decision(
+            {"route": "tbms", "lookup_type": "company_name", "document_type": "bank_certificate", "vendor_name": "ABC", "license_no": "", "confidence": 0.9, "reason": "bank cert"},
+            "bank certificate ABC",
+        )
+        self.assertEqual(decision["document_type"], "bank_certificate")
+        self.assertEqual(decision["route"], "tbms")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,11 @@ except ImportError:  # pragma: no cover - optional dependency
     cv2 = None
 
 try:
+    import zxingcpp
+except ImportError:  # pragma: no cover - optional dependency
+    zxingcpp = None
+
+try:
     import numpy as np
 except ImportError:  # pragma: no cover - optional dependency
     np = None
@@ -37,6 +42,8 @@ def extract_qr_codes_from_pdf(file_bytes: bytes) -> list[str]:
             qr_codes.extend(_extract_qr_codes_from_page(page))
         if not qr_codes:
             qr_codes.extend(_extract_urls_from_reader(reader))
+    if not qr_codes:
+        qr_codes.extend(_extract_qr_codes_from_fitz_images(file_bytes))
     if not qr_codes:
         qr_codes.extend(_extract_qr_codes_from_rendered_pdf(file_bytes))
     return _unique_values(qr_codes)
@@ -98,11 +105,41 @@ def _extract_qr_codes_from_rendered_pdf(file_bytes: bytes) -> list[str]:
     for page_index in range(len(document)):
         try:
             page = document[page_index]
-            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-            image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
-            qr_codes.extend(_decode_qr_from_image_array(np.array(image)))
+            for matrix in (fitz.Matrix(2, 2), fitz.Matrix(3, 3), fitz.Matrix(4, 4), fitz.Matrix(5, 5)):
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
+                qr_codes.extend(_decode_qr_from_image_array(np.array(image)))
+                if qr_codes:
+                    break
         except Exception:
             continue
+    return qr_codes
+
+
+def _extract_qr_codes_from_fitz_images(file_bytes: bytes) -> list[str]:
+    if fitz is None or Image is None or cv2 is None or np is None:
+        return []
+    try:
+        document = fitz.open(stream=file_bytes, filetype="pdf")
+    except Exception:
+        return []
+
+    qr_codes: list[str] = []
+    for page in document:
+        try:
+            images = page.get_images(full=True) or []
+        except Exception:
+            continue
+        for image_info in images:
+            xref = image_info[0]
+            try:
+                extracted = document.extract_image(xref)
+            except Exception:
+                extracted = None
+            if not extracted:
+                continue
+            image_bytes = extracted.get("image") if isinstance(extracted, dict) else None
+            qr_codes.extend(_decode_qr_from_image_bytes(image_bytes or b""))
     return qr_codes
 
 
@@ -115,15 +152,21 @@ def _image_bytes(image_object: Any) -> bytes:
 
 def _decode_qr_from_image_bytes(image_bytes: bytes) -> list[str]:
     if not image_bytes or Image is None or cv2 is None or np is None:
-        return []
+        return _decode_qr_with_zxing_bytes(image_bytes)
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        qr_codes = _decode_qr_with_zxing_bytes(image_bytes)
+        if qr_codes:
+            return qr_codes
         return _decode_qr_from_image_array(np.array(image))
     except Exception:
-        return []
+        return _decode_qr_with_zxing_bytes(image_bytes)
 
 
 def _decode_qr_from_image_array(image_array: Any) -> list[str]:
+    qr_codes = _decode_qr_with_zxing_array(image_array)
+    if qr_codes:
+        return qr_codes
     if cv2 is None or np is None:
         return []
     try:
@@ -141,6 +184,40 @@ def _decode_qr_from_image_array(image_array: Any) -> list[str]:
         return [decoded_text.strip()] if decoded_text and decoded_text.strip() else []
     except Exception:
         return []
+
+
+def _decode_qr_with_zxing_bytes(image_bytes: bytes) -> list[str]:
+    if zxingcpp is None or Image is None:
+        return []
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        return _decode_qr_with_zxing_array(np.array(image) if np is not None else image)
+    except Exception:
+        return []
+
+
+def _decode_qr_with_zxing_array(image_array: Any) -> list[str]:
+    if zxingcpp is None:
+        return []
+    try:
+        decoded = zxingcpp.read_barcodes(image_array)
+    except Exception:
+        return []
+    qr_codes: list[str] = []
+    for result in decoded or []:
+        text = getattr(result, "text", "") or ""
+        if not text and hasattr(result, "bytes"):
+            raw_bytes = getattr(result, "bytes", b"") or b""
+            for encoding in ("utf-8", "cp1256", "latin-1"):
+                try:
+                    text = raw_bytes.decode(encoding).strip()
+                    break
+                except Exception:
+                    continue
+        text = text.strip()
+        if text and text not in qr_codes:
+            qr_codes.append(text)
+    return qr_codes
 
 
 def _unique_values(values: list[str]) -> list[str]:
@@ -163,6 +240,8 @@ def _extract_urls_from_qr_payloads(file_bytes: bytes) -> list[str]:
     qr_payloads = extract_qr_codes_from_pdf(file_bytes)
     urls: list[str] = []
     for payload in qr_payloads:
+        if payload and payload.lower().startswith(("http://", "https://")):
+            urls.append(payload.strip())
         urls.extend(_extract_urls_from_text(payload))
     return urls
 
