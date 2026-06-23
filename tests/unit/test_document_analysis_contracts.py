@@ -20,8 +20,8 @@ from app.use_cases.document_analysis import (
     build_document_analysis_response,
     build_trade_license_response,
 )
-from app.use_cases.document_analysis_routes import _remember_approved_trade_document, _route_payload
-from app.use_cases.general_bot_memory import clear_trusted_trade_document, get_trusted_trade_document
+from app.use_cases.document_analysis_routes import _remember_approved_trade_document, _resolve_requested_company_name, _route_payload
+from app.use_cases.general_bot_memory import clear_conversation_entities, clear_trusted_trade_document, get_trusted_trade_document, remember_conversation_entities
 from app.use_cases.upload_blob import _with_success_metadata
 
 
@@ -148,7 +148,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertNotIn("BusinessName", payload["results"])
         self.assertNotIn("TradeNameEnglish", payload["results"])
 
-    def test_trade_license_response_strips_legal_suffix_from_trade_name(self) -> None:
+    def test_trade_license_response_keeps_trade_name_raw(self) -> None:
         outcome = AnalysisOutcome(
             provider="document_intelligence",
             raw_result={
@@ -174,9 +174,9 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
 
         payload = build_trade_license_response(outcome, ["TradeName"])
         self.assertEqual(payload["status"], "success")
-        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
+        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING - SOLE PROPRIETORSHIP L.L.C.")
 
-    def test_trade_license_response_normalizes_company_name_examples(self) -> None:
+    def test_trade_license_response_keeps_trade_company_names_raw(self) -> None:
         outcome = AnalysisOutcome(
             provider="document_intelligence",
             raw_result={
@@ -211,8 +211,8 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         )
 
         payload = build_trade_license_response(outcome, ["CompanyName", "TradeName", "TradeNameEnglish"])
-        self.assertEqual(payload["results"]["CompanyName"]["value"], "CONSTRUCTION MACHINERY CENTER")
-        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
+        self.assertEqual(payload["results"]["CompanyName"]["value"], "CONSTRUCTION MACHINERY CENTER CO.(L.L.C)")
+        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING - SOLE PROPRIETORSHIP L.L.C.")
         self.assertEqual(payload["results"]["TradeNameEnglish"]["value"], "GREEN LIFE EQUIPMENT TRADING")
 
     def test_trade_license_response_rejects_fragment_company_name(self) -> None:
@@ -277,7 +277,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(payload["status"], "fail")
         self.assertNotIn("CompanyName", payload["results"])
 
-    def test_trade_license_response_strips_additional_legal_suffix_terms(self) -> None:
+    def test_trade_license_response_keeps_additional_legal_suffix_terms_raw(self) -> None:
         outcome = AnalysisOutcome(
             provider="document_intelligence",
             raw_result={
@@ -303,7 +303,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
 
         payload = build_trade_license_response(outcome, ["TradeName"])
         self.assertEqual(payload["status"], "success")
-        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING")
+        self.assertEqual(payload["results"]["TradeName"]["value"], "GREEN LIFE EQUIPMENT TRADING - SOLE PROPRIETORSHIP")
 
     def test_trade_license_response_splits_merged_unified_numbers(self) -> None:
         outcome = AnalysisOutcome(
@@ -670,6 +670,13 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(stored["expiry_date"], "2027-04-06")
         self.assertEqual(stored["licensed_activities"], "Construction Equipment Trading")
         self.assertEqual(stored["document_acceptance"]["status"], "approved")
+
+    def test_requested_company_name_falls_back_to_conversation_memory(self) -> None:
+        conversation_id = "conv-company-memory"
+        clear_conversation_entities(conversation_id)
+        remember_conversation_entities(conversation_id, company_name="Eurocon Building Industries FZE")
+        resolved = _resolve_requested_company_name({"conversation_id": conversation_id, "company_name": ""})
+        self.assertEqual(resolved, "Eurocon Building Industries FZE")
 
     @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 0.95, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.extract_document_fields_with_azure_openai", return_value={"document_type": "vat", "company_name": {"value": "GREEN LIFE EQUIPMENT TRADING", "confidence": 0.95}, "vat_number": {"value": "100382292900003", "confidence": 0.99}})

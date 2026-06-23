@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any, Iterable, Optional
 
 from app.infrastructure.document_logo_extraction import extract_logo_presence_from_pdf
+from app.use_cases.company_name_matching import compare_company_names
 from app.use_cases.trade_license_expiry import parse_trade_license_expiry_date
 
 
@@ -24,8 +25,9 @@ def build_document_acceptance_response(
     payload: dict[str, Any],
     today: Optional[date] = None,
     file_bytes: bytes | None = None,
+    requested_company_name: str | None = None,
 ) -> dict[str, Any]:
-    result = evaluate_document_acceptance(document_type, payload, today=today, file_bytes=file_bytes)
+    result = evaluate_document_acceptance(document_type, payload, today=today, file_bytes=file_bytes, requested_company_name=requested_company_name)
     return {
         "document_type": result.document_type,
         "status": result.status,
@@ -56,19 +58,20 @@ def evaluate_document_acceptance(
     payload: dict[str, Any],
     today: Optional[date] = None,
     file_bytes: bytes | None = None,
+    requested_company_name: str | None = None,
 ) -> DocumentAcceptanceResult:
     normalized_type = _resolve_document_type(document_type, payload)
     today = today or date.today()
     results = _results_section(payload)
 
     if normalized_type == "trade":
-        return _evaluate_trade_license(payload, results, today, file_bytes=file_bytes)
+        return _evaluate_trade_license(payload, results, today, file_bytes=file_bytes, requested_company_name=requested_company_name)
     if normalized_type == "vat":
-        return _evaluate_vat(payload, results, file_bytes=file_bytes)
+        return _evaluate_vat(payload, results, file_bytes=file_bytes, requested_company_name=requested_company_name)
     if normalized_type == "bank":
-        return _evaluate_bank(payload, results, file_bytes=file_bytes)
+        return _evaluate_bank(payload, results, file_bytes=file_bytes, requested_company_name=requested_company_name)
     if normalized_type == "affection_plan":
-        return _evaluate_affection_plan(payload, results, file_bytes=file_bytes)
+        return _evaluate_affection_plan(payload, results, file_bytes=file_bytes, requested_company_name=requested_company_name)
     return DocumentAcceptanceResult(document_type=normalized_type, status="rejected", score=0, missing_fields=[], reasons=[f"Unsupported document type: {document_type}"])
 
 
@@ -77,6 +80,7 @@ def _evaluate_trade_license(
     results: dict[str, Any],
     today: date,
     file_bytes: bytes | None = None,
+    requested_company_name: str | None = None,
 ) -> DocumentAcceptanceResult:
     missing_fields: list[str] = []
     reasons: list[str] = []
@@ -99,6 +103,24 @@ def _evaluate_trade_license(
     elif expiry_date is not None and expiry_date < today:
         reasons.append("Trade license is expired.")
         missing_fields.append("expiry_date")
+
+    requested_company_name = _normalize_text(requested_company_name)
+    if requested_company_name and trade_name:
+        comparison = compare_company_names(requested_company_name, trade_name)
+        if not comparison.exact_match:
+            reasons.append(
+                f"Requested company name '{requested_company_name}' does not match uploaded trade license company name '{trade_name}'."
+            )
+            missing_fields.append("company_name_mismatch")
+            return _result(
+                "trade",
+                "rejected",
+                missing_fields,
+                reasons,
+                score_override=0,
+                expiry_date=expiry_date,
+                is_expired=bool(expiry_date is not None and expiry_date < today),
+            )
 
     if missing_fields:
         return _result("trade", "rejected", missing_fields, reasons, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
@@ -136,7 +158,12 @@ def _evaluate_trade_license(
     return _result("trade", _status_from_score(score), [], reasons, score_override=score, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
 
 
-def _evaluate_vat(payload: dict[str, Any], results: dict[str, Any], file_bytes: bytes | None = None) -> DocumentAcceptanceResult:
+def _evaluate_vat(
+    payload: dict[str, Any],
+    results: dict[str, Any],
+    file_bytes: bytes | None = None,
+    requested_company_name: str | None = None,
+) -> DocumentAcceptanceResult:
     missing_fields: list[str] = []
 
     tax_number = _first_value(results, _VAT_NUMBER_FIELDS)
@@ -150,10 +177,29 @@ def _evaluate_vat(payload: dict[str, Any], results: dict[str, Any], file_bytes: 
     if missing_fields:
         return _result("vat", "rejected", missing_fields, [])
 
+    requested_company_name = _normalize_text(requested_company_name)
+    if requested_company_name and company_name:
+        comparison = compare_company_names(requested_company_name, company_name)
+        if not comparison.exact_match:
+            return _result(
+                "vat",
+                "rejected",
+                ["company_name_mismatch"],
+                [
+                    f"Requested company name '{requested_company_name}' does not match uploaded VAT company name '{company_name}'."
+                ],
+                score_override=0,
+            )
+
     return _score_with_signals("vat", payload, file_bytes=file_bytes)
 
 
-def _evaluate_bank(payload: dict[str, Any], results: dict[str, Any], file_bytes: bytes | None = None) -> DocumentAcceptanceResult:
+def _evaluate_bank(
+    payload: dict[str, Any],
+    results: dict[str, Any],
+    file_bytes: bytes | None = None,
+    requested_company_name: str | None = None,
+) -> DocumentAcceptanceResult:
     missing_fields: list[str] = []
 
     company_name = _first_value(results, _BANK_NAME_FIELDS)
@@ -164,10 +210,29 @@ def _evaluate_bank(payload: dict[str, Any], results: dict[str, Any], file_bytes:
     if missing_fields:
         return _result("bank", "rejected", missing_fields, [])
 
+    requested_company_name = _normalize_text(requested_company_name)
+    if requested_company_name and company_name:
+        comparison = compare_company_names(requested_company_name, company_name)
+        if not comparison.exact_match:
+            return _result(
+                "bank",
+                "rejected",
+                ["company_name_mismatch"],
+                [
+                    f"Requested company name '{requested_company_name}' does not match uploaded bank document company name '{company_name}'."
+                ],
+                score_override=0,
+            )
+
     return _score_bank_with_logo_and_gpt(payload, file_bytes=file_bytes)
 
 
-def _evaluate_affection_plan(payload: dict[str, Any], results: dict[str, Any], file_bytes: bytes | None = None) -> DocumentAcceptanceResult:
+def _evaluate_affection_plan(
+    payload: dict[str, Any],
+    results: dict[str, Any],
+    file_bytes: bytes | None = None,
+    requested_company_name: str | None = None,
+) -> DocumentAcceptanceResult:
     missing_fields: list[str] = []
 
     parcel_id = _first_value(results, _AFFECTION_PLAN_PARCEL_FIELDS)
@@ -278,6 +343,10 @@ def _first_value(results: dict[str, Any], field_names: Iterable[str]) -> Any:
         elif field_result not in (None, "", [], {}):
             return field_result
     return None
+
+
+def _normalize_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
 
 
 def _signal_present(payload: dict[str, Any], key: str) -> bool:

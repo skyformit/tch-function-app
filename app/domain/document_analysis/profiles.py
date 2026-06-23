@@ -279,8 +279,6 @@ class DocumentAnalysisProfile:
         return names[:20]
 
     def normalize_field_value(self, field_name: str, value: Any) -> Any:
-        if field_name in {"CompanyName", "TradeName", "TradeNameEnglish", "OperatingName", "BusinessName"}:
-            return _normalize_trade_name_value(value)
         return value
 
 

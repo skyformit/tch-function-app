@@ -20,7 +20,7 @@ from app.domain.document_analysis.extraction import extract_fields_with_confiden
 from app.use_cases.document_acceptance import build_document_acceptance_response
 from app.use_cases.document_analysis_responses import build_document_analysis_response, build_trade_license_response
 from app.use_cases.document_analysis_runtime import analyze_trade_license_document, score_results
-from app.use_cases.general_bot_memory import remember_trusted_trade_document
+from app.use_cases.general_bot_memory import get_conversation_entities, remember_trusted_trade_document
 from core.foundry import _json_response
 
 
@@ -59,6 +59,7 @@ def _route_payload(
     content_type: Optional[str],
     target_fields: list[str],
     conversation_id: Optional[str] = None,
+    requested_company_name: Optional[str] = None,
     context_hint: Optional[str] = None,
 ) -> dict:
     canonical_target_fields = _canonical_target_fields(profile, is_trade, target_fields)
@@ -79,7 +80,12 @@ def _route_payload(
         )
         response_payload = _promote_llm_first_payload(response_payload)
         response_payload["gpt_review"] = review_with_azure_openai(response_payload.get("results", {}))
-        response_payload["document_acceptance"] = build_document_acceptance_response("trade", response_payload, file_bytes=file_bytes)
+        response_payload["document_acceptance"] = build_document_acceptance_response(
+            "trade",
+            response_payload,
+            file_bytes=file_bytes,
+            requested_company_name=requested_company_name,
+        )
         _remember_approved_trade_document(conversation_id, response_payload)
         return response_payload
     response_payload["llm_extraction"] = extract_document_fields_with_azure_openai(outcome.raw_result, context_hint=context_hint)
@@ -100,7 +106,12 @@ def _route_payload(
         )
         response_payload = _promote_llm_first_payload(response_payload)
         response_payload["gpt_review"] = review_with_azure_openai(response_payload.get("results", {}), context_hint=context_hint)
-        response_payload["document_acceptance"] = build_document_acceptance_response("vat", response_payload, file_bytes=file_bytes)
+        response_payload["document_acceptance"] = build_document_acceptance_response(
+            "vat",
+            response_payload,
+            file_bytes=file_bytes,
+            requested_company_name=requested_company_name,
+        )
         return response_payload
     if profile and profile.route_name == "ValidateBankDocument":
         response_payload = _apply_bank_account_name_fallback(response_payload, file_bytes)
@@ -115,13 +126,23 @@ def _route_payload(
         )
         response_payload = _promote_llm_first_payload(response_payload)
         response_payload["gpt_review"] = review_with_azure_openai(response_payload.get("results", {}), context_hint=context_hint)
-        response_payload["document_acceptance"] = build_document_acceptance_response("bank", response_payload, file_bytes=file_bytes)
+        response_payload["document_acceptance"] = build_document_acceptance_response(
+            "bank",
+            response_payload,
+            file_bytes=file_bytes,
+            requested_company_name=requested_company_name,
+        )
         return response_payload
     if profile and profile.route_name == "ValidateAffectionPlan":
         _merge_document_signals(response_payload, outcome.raw_result, file_bytes)
         response_payload = _promote_llm_first_payload(response_payload)
         response_payload["gpt_review"] = review_with_azure_openai(response_payload.get("results", {}), context_hint=context_hint)
-        response_payload["document_acceptance"] = build_document_acceptance_response("affection_plan", response_payload, file_bytes=file_bytes)
+        response_payload["document_acceptance"] = build_document_acceptance_response(
+            "affection_plan",
+            response_payload,
+            file_bytes=file_bytes,
+            requested_company_name=requested_company_name,
+        )
         return response_payload
     response_payload = _promote_llm_first_payload(response_payload)
     response_payload["gpt_review"] = review_with_azure_openai(response_payload.get("results", {}), context_hint=context_hint)
@@ -305,6 +326,7 @@ async def _run_analysis_route(req: Request, target_fields: list[str], profile: O
         resolved_content_type,
         target_fields,
         conversation_id=form_fields.get("conversation_id"),
+        requested_company_name=_resolve_requested_company_name(form_fields),
         context_hint=context_hint or None,
     )
     return _json_response(payload, status_code=200)
@@ -323,6 +345,17 @@ def _build_document_context_hint(form_fields: dict[str, str]) -> str:
         if value:
             parts.append(f"{label}: {value}")
     return "\n".join(parts).strip()
+
+
+def _resolve_requested_company_name(form_fields: dict[str, str]) -> str:
+    requested_company_name = (form_fields.get("company_name") or "").strip()
+    if requested_company_name:
+        return requested_company_name
+    conversation_id = (form_fields.get("conversation_id") or "").strip()
+    if not conversation_id:
+        return ""
+    remembered_entities = get_conversation_entities(conversation_id)
+    return (remembered_entities.get("company_name") or "").strip()
 
 
 def _remember_approved_trade_document(conversation_id: Optional[str], response_payload: dict) -> None:

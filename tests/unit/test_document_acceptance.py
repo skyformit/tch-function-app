@@ -144,6 +144,65 @@ class DocumentAcceptanceTest(unittest.TestCase):
         self.assertFalse(result.is_expired)
         mock_logo.assert_called_once()
 
+    def test_trade_license_rejects_when_requested_company_does_not_match(self) -> None:
+        payload = {
+            "results": {
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
+                "ExpiryDate": {"value": "06/04/2027"},
+                "LicenceActivities": {"value": "Construction Equipment Trading"},
+            },
+            "qr_codes": {"value": ["https://example.com/qr"]},
+            "verification_urls": {"value": ["https://example.com/verify"]},
+            "gpt_review": {
+                "is_consistent": True,
+                "anomalies": [],
+                "plausibility_score": 1.0,
+                "reasoning": "Looks consistent.",
+            },
+        }
+
+        result = evaluate_document_acceptance(
+            "trade",
+            payload,
+            today=date(2026, 6, 21),
+            file_bytes=b"%PDF-1.4",
+            requested_company_name="Eurocon Building Industries FZE",
+        )
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 0)
+        self.assertIn("company_name_mismatch", result.missing_fields)
+        self.assertTrue(any("does not match uploaded trade license company name" in reason for reason in result.reasons))
+
+    @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
+    def test_trade_license_accepts_when_requested_company_matches_canonically(self, mock_logo: object) -> None:
+        payload = {
+            "results": {
+                "TradeName": {"value": "Eurocon Building Industries FZE"},
+                "ExpiryDate": {"value": "06/04/2027"},
+                "LicenceActivities": {"value": "Construction Equipment Trading"},
+            },
+            "qr_codes": {"value": ["https://example.com/qr"]},
+            "verification_urls": {"value": ["https://example.com/verify"]},
+            "gpt_review": {
+                "is_consistent": True,
+                "anomalies": [],
+                "plausibility_score": 1.0,
+                "reasoning": "Looks consistent.",
+            },
+        }
+
+        result = evaluate_document_acceptance(
+            "trade",
+            payload,
+            today=date(2026, 6, 21),
+            file_bytes=b"%PDF-1.4",
+            requested_company_name="Eurocon Building Industries",
+        )
+        self.assertEqual(result.status, "approved")
+        self.assertEqual(result.score, 100)
+        self.assertNotIn("company_name_mismatch", result.missing_fields)
+        mock_logo.assert_called_once()
+
     @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
     def test_bank_document_scores_logo_only_to_review(self, mock_logo: object) -> None:
         payload = {
@@ -303,6 +362,41 @@ class DocumentAcceptanceTest(unittest.TestCase):
         self.assertEqual(result.status, "rejected")
         self.assertIn("company_name", result.missing_fields)
 
+    def test_vat_rejects_when_requested_company_does_not_match(self) -> None:
+        payload = {
+            "results": {
+                "TaxRegistrationNumber": {"value": "100382292900003"},
+                "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+            }
+        }
+
+        result = evaluate_document_acceptance(
+            "vat",
+            payload,
+            requested_company_name="FISCHER FIXING",
+        )
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 0)
+        self.assertIn("company_name_mismatch", result.missing_fields)
+        self.assertTrue(any("does not match uploaded VAT company name" in reason for reason in result.reasons))
+
+    def test_vat_accepts_when_requested_company_matches_canonically(self) -> None:
+        payload = {
+            "results": {
+                "TaxRegistrationNumber": {"value": "100382292900003"},
+                "LegalNameEnglish": {"value": "Eurocon Building Industries FZE"},
+            }
+        }
+
+        result = evaluate_document_acceptance(
+            "vat",
+            payload,
+            requested_company_name="Eurocon Building Industries",
+        )
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 60)
+        self.assertNotIn("company_name_mismatch", result.missing_fields)
+
     def test_bank_accepts_company_name(self) -> None:
         payload = {"results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}}
 
@@ -342,6 +436,45 @@ class DocumentAcceptanceTest(unittest.TestCase):
         result = evaluate_document_acceptance("bank", payload)
         self.assertEqual(result.status, "rejected")
         self.assertIn("bank_name", result.missing_fields)
+
+    def test_bank_rejects_when_requested_company_does_not_match(self) -> None:
+        payload = {
+            "results": {
+                "AccountName": {"value": "Eurocon Building Industries FZE"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
+                "AccountNumber": {"value": "1000078384"},
+                "IBAN": {"value": "AE030230000001000078384"},
+            }
+        }
+
+        result = evaluate_document_acceptance(
+            "bank",
+            payload,
+            requested_company_name="FISCHER FIXING",
+        )
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 0)
+        self.assertIn("company_name_mismatch", result.missing_fields)
+        self.assertTrue(any("does not match uploaded bank document company name" in reason for reason in result.reasons))
+
+    def test_bank_accepts_when_requested_company_matches_canonically(self) -> None:
+        payload = {
+            "results": {
+                "AccountName": {"value": "Eurocon Building Industries FZE"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
+                "AccountNumber": {"value": "1000078384"},
+                "IBAN": {"value": "AE030230000001000078384"},
+            }
+        }
+
+        result = evaluate_document_acceptance(
+            "bank",
+            payload,
+            requested_company_name="Eurocon Building Industries",
+        )
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 75)
+        self.assertNotIn("company_name_mismatch", result.missing_fields)
 
     def test_response_wrapper_returns_frontend_shape(self) -> None:
         payload = {
