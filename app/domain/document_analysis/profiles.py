@@ -297,6 +297,7 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
         "TradeNameEnglish",
         "OperatingName",
         "BusinessName",
+        "IssuingAuthority",
         "IssueDate",
         "ExpiryDate",
         "OfficialEmail",
@@ -307,6 +308,7 @@ TRADE_LICENSE_PROFILE = DocumentAnalysisProfile(
         "UnifiedRegistrationNo": ["UnifiedRegistrationNo", "UnifiedRegistration", "RegistrationNo"],
         "UnifiedLicenceNo": ["UnifiedLicenceNo", "UnifiedLicenseNo", "UnifiedLicence"],
         "CompanyName": ["Company Name", "Company", "LegalNameEnglish"],
+        "IssuingAuthority": ["Issuing Authority", "Authority", "Issued By", "License Issuing Authority", "Registration Authority", "Department", "جهة الترخيص", "جهة الإصدار"],
         "IssueDate": ["IssuanceDate"],
         "OfficialEmail": ["Email"],
         "OfficialMobile": ["Mobile", "Phone"],
@@ -326,11 +328,13 @@ VAT_PROFILE = DocumentAnalysisProfile(
         "TaxRegistrationNumber",
         "LegalNameArabic",
         "LegalNameEnglish",
+        "IssuingAuthority",
     ],
     query_field_aliases={
         "TaxRegistrationNumber": ["TaxRegistrationNo", "TRN", "VATNumber", "VATRegistrationNumber"],
         "LegalNameArabic": ["ArabicName"],
         "LegalNameEnglish": ["EnglishName", "LegalName"],
+        "IssuingAuthority": ["Issuing Authority", "Authority", "Issued By", "Tax Authority", "Federal Tax Authority", "الهيئة الاتحادية للضرائب", "جهة الإصدار"],
     },
     minimum_confidence={
         "TaxRegistrationNumber": 0.75,
@@ -354,6 +358,7 @@ BANK_PROFILE = DocumentAnalysisProfile(
         "IBAN",
         "SwiftCode",
         "Branch",
+        "IssuingAuthority",
     ],
     query_field_aliases={
         "BankName": ["Bank", "NameOfBank", "FinancialInstitution"],
@@ -362,6 +367,7 @@ BANK_PROFILE = DocumentAnalysisProfile(
         "IBAN": ["IBANNumber", "InternationalBankAccountNumber"],
         "SwiftCode": ["SWIFT", "Swift", "BIC", "BICCode"],
         "Branch": ["BranchName", "BankBranch"],
+        "IssuingAuthority": ["Issuing Authority", "Authority", "Issued By", "Bank", "Branch", "Financial Institution"],
     },
     minimum_confidence={
         "BankName": 0.55,

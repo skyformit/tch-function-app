@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import date
 from types import SimpleNamespace
@@ -7,7 +8,9 @@ from app.domain.document_analysis.profiles import BANK_PROFILE, VAT_PROFILE
 from app.infrastructure.document_qr_extraction import _extract_urls_from_text
 from app.use_cases.document_analysis_extras import (
     _combined_messages,
+    _combined_system_prompt,
     _extraction_messages,
+    _extraction_system_prompt,
     _raw_result_content_only,
     build_trade_license_extras,
     extract_qr_codes,
@@ -489,6 +492,22 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertIn("conversation_id: conv-1", messages[1]["content"])
         self.assertIn("company_name: Eurocon Building Industries FZE", messages[1]["content"])
 
+    def test_extraction_prompt_mentions_trade_vat_bank_authorities(self) -> None:
+        prompt = _extraction_system_prompt()
+        self.assertIn("Department of Economy and Tourism", prompt)
+        self.assertIn("JAFZA", prompt)
+        self.assertIn("Federal Tax Authority", prompt)
+        self.assertIn("Financial Institution", prompt)
+        self.assertIn("generic government header", prompt)
+
+    def test_combined_prompt_mentions_trade_vat_bank_authorities(self) -> None:
+        prompt = _combined_system_prompt()
+        self.assertIn("Department of Economy and Tourism", prompt)
+        self.assertIn("JAFZA", prompt)
+        self.assertIn("Federal Tax Authority", prompt)
+        self.assertIn("financial institution", prompt)
+        self.assertIn("generic government header", prompt)
+
     def test_combined_messages_include_context_hint(self) -> None:
         messages = _combined_messages(
             {"content": "raw ocr"},
@@ -573,6 +592,36 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertEqual(extras["llm_extraction"]["trade_license_number"]["value"], "CN-1067688")
         mock_combined.assert_called_once()
 
+    def test_trade_llm_extraction_projects_issuing_authority(self) -> None:
+        projected = project_llm_extraction_fields(
+            {
+                "document_type": "trade",
+                "issuing_authority": {"value": "Department of Economy and Tourism, Dubai", "confidence": 0.99},
+            }
+        )
+
+        self.assertIn("IssuingAuthority", projected)
+        self.assertEqual(projected["IssuingAuthority"]["value"], "Department of Economy and Tourism, Dubai")
+
+    def test_trade_llm_extraction_combined_output_keeps_issuing_authority(self) -> None:
+        from app.use_cases.document_analysis_extras import _parse_combined_output
+
+        parsed = _parse_combined_output(
+            json.dumps(
+                {
+                    "gpt_review": {"is_consistent": True, "anomalies": [], "plausibility_score": 1.0, "reasoning": "Looks consistent."},
+                    "llm_extraction": {
+                        "document_type": "trade",
+                        "issuing_authority": {"value": "Department of Economy and Tourism, Dubai", "confidence": 0.99},
+                    },
+                }
+            ),
+            date(2026, 6, 24),
+        )
+
+        self.assertIn("issuing_authority", parsed["llm_extraction"])
+        self.assertEqual(parsed["llm_extraction"]["issuing_authority"]["value"], "Department of Economy and Tourism, Dubai")
+
     @patch("app.use_cases.document_analysis_routes.review_with_azure_openai", return_value={"is_consistent": True, "anomalies": [], "plausibility_score": 1.0, "reasoning": "Looks consistent."})
     @patch("app.use_cases.document_analysis_routes.build_trade_license_response")
     @patch("app.use_cases.document_analysis_routes.build_trade_license_extras")
@@ -586,6 +635,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
                 "LicenseNo": {"value": "206558", "confidence": 0.95},
                 "ExpiryDate": {"value": "06/04/2027", "confidence": 0.95},
                 "LicenceActivities": {"value": "Construction Equipment Trading", "confidence": 0.95},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai", "confidence": 0.95},
             },
             "source": "document_intelligence",
             "origin": "document_intelligence",
@@ -683,7 +733,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
     @patch("app.use_cases.document_analysis_routes.build_document_analysis_response")
     @patch("app.use_cases.document_analysis_routes._apply_vat_analysis_fallback", side_effect=lambda payload, *_args: payload)
     def test_vat_route_payload_includes_llm_extraction(self, mock_fallback, mock_build_response, mock_llm_extraction, mock_gpt_review) -> None:
-        mock_build_response.return_value = {"status": "success", "score": 0.91, "results": {"TaxRegistrationNumber": {"value": "100382292900003"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
+        mock_build_response.return_value = {"status": "success", "score": 0.91, "results": {"TaxRegistrationNumber": {"value": "100382292900003"}, "IssuingAuthority": {"value": "Federal Tax Authority"}}, "source": "document_intelligence", "origin": "document_intelligence", "source_type": "document_intelligence"}
         outcome = AnalysisOutcome(
             provider="document_intelligence",
             raw_result={"contents": [{"fields": {}}]},
@@ -723,6 +773,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             "results": {
                 "TaxRegistrationNumber": {"value": "100382292900003"},
                 "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
             },
             "source": "document_intelligence",
             "origin": "document_intelligence",
@@ -751,7 +802,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertIn("document_acceptance", payload)
         self.assertEqual(payload["document_acceptance"]["status"], "approved")
         self.assertTrue(payload["document_acceptance"]["acceptable"])
-        self.assertEqual(payload["document_acceptance"]["score"], 100)
+        self.assertEqual(payload["document_acceptance"]["score"], 95)
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()
@@ -805,6 +856,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             "score": 0.93,
             "results": {
                 "AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
             },
             "source": "document_intelligence",
             "origin": "document_intelligence",
@@ -854,6 +906,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
             "results": {
                 "TaxRegistrationNumber": {"value": "100382292900003"},
                 "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
             },
             "source": "document_intelligence",
             "origin": "document_intelligence",
@@ -874,7 +927,7 @@ class DocumentAnalysisContractsTest(unittest.TestCase):
         self.assertIn("document_acceptance", payload)
         self.assertEqual(payload["document_acceptance"]["status"], "rejected")
         self.assertFalse(payload["document_acceptance"]["acceptable"])
-        self.assertEqual(payload["document_acceptance"]["score"], 74)
+        self.assertEqual(payload["document_acceptance"]["score"], 75)
         mock_llm_extraction.assert_called_once()
         mock_build_response.assert_called_once()
         mock_fallback.assert_called_once()

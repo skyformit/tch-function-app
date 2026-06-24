@@ -330,6 +330,23 @@ def _extraction_system_prompt() -> str:
     "- Registration Date\n"
     "- تاريخ الإصدار\n\n"
 
+    "issuing_authority:\n"
+    "- Issuing Authority\n"
+    "- Authority\n"
+    "- Issued By\n"
+    "- License Issuing Authority\n"
+    "- Registration Authority\n"
+    "- Department\n"
+    "- جهة الترخيص\n"
+    "- جهة الإصدار\n"
+    "- صادر عن\n\n"
+    "- For trade licenses, prefer the actual licensing body over a generic government header.\n"
+    "- Mainland examples include Department of Economy and Tourism, Department of Economic Development, DED, DET, ADDED, SEDD, and similar emirate licensing bodies.\n"
+    "- Free zone examples include JAFZA, DAFZA, IFZA, RAKEZ/KEZAD/KIZAD, DMCC, DIFC, Dubai South, Meydan Free Zone, Dubai Silicon Oasis, Hamriyah Free Zone, Sharjah Airport International Free Zone, SAIF Zone, Fujairah Free Zone, Umm Al Quwain Free Trade Zone, and similar free-zone authorities.\n"
+    "- For VAT documents, prefer Federal Tax Authority / FTA / الهيئة الاتحادية للضرائب.\n"
+    "- If the document shows a generic header such as Government of Dubai and also shows a more specific licensing body in the license details section, choose the more specific licensing body.\n"
+    "- If only a generic header is present and no specific licensing body can be identified, return that generic header only as a fallback.\n\n"
+
     "vat_number:\n"
     "- VAT Number\n"
     "- VAT Registration Number\n"
@@ -456,6 +473,7 @@ def _extraction_system_prompt() -> str:
     '  "expiry_date": {"value": null, "confidence": null},\n'
     '  "is_expired": {"value": null, "confidence": null},\n'
     '  "company_name": {"value": null, "confidence": null},\n'
+    '  "issuing_authority": {"value": null, "confidence": null},\n'
     '  "bank_name": {"value": null, "confidence": null},\n'
     '  "account_number": {"value": null, "confidence": null},\n'
     '  "iban": {"value": null, "confidence": null},\n'
@@ -486,6 +504,7 @@ def _normalize_extraction(extraction: dict[str, Any], today: date) -> dict[str, 
         "trade_license_number",
         "expiry_date",
         "company_name",
+        "issuing_authority",
         "bank_name",
         "account_number",
         "iban",
@@ -546,6 +565,7 @@ def project_llm_extraction_fields(llm_extraction: dict[str, Any] | None) -> dict
             "LicenseNo": "trade_license_number",
             "ExpiryDate": "expiry_date",
             "IssueDate": "issue_date",
+            "IssuingAuthority": "issuing_authority",
             "LicenceActivities": "license_activities",
             "CompanyName": "company_name",
             "TradeName": "company_name",
@@ -559,6 +579,7 @@ def project_llm_extraction_fields(llm_extraction: dict[str, Any] | None) -> dict
             "TaxRegistrationNumber": "vat_number",
             "LegalNameEnglish": "company_name",
             "LegalNameArabic": "company_name",
+            "IssuingAuthority": "issuing_authority",
         },
         "bank": {
             "BankName": "bank_name",
@@ -566,6 +587,7 @@ def project_llm_extraction_fields(llm_extraction: dict[str, Any] | None) -> dict
             "AccountNumber": "account_number",
             "IBAN": "iban",
             "SwiftCode": "bank_name",
+            "IssuingAuthority": "issuing_authority",
         },
     }.get(document_type, {})
     projected: dict[str, dict[str, Any]] = {}
@@ -673,8 +695,8 @@ def _combined_system_prompt() -> str:
     return (
         "You are a document intelligence assistant.\n"
         "You must produce both a document review and a document extraction in a single JSON response.\n\n"
-        "gpt_review: inspect the extracted fields for internal inconsistencies, implausible values, placeholder/test data, date logic errors, formatting that looks machine-altered, or anything that suggests the document is fake, templated, or tampered with. Use only internal consistency and plausibility.\n\n"
-        "llm_extraction: extract the key document fields exactly as they appear in the raw OCR/document analysis JSON. Do not guess or invent. Trim whitespace only.\n\n"
+        "gpt_review: inspect the extracted fields for internal inconsistencies, implausible values, placeholder/test data, date logic errors, formatting that looks machine-altered, or anything that suggests the document is fake, templated, tampered with, or suspicious. Use only internal consistency and plausibility. If a standard issuing authority is present and plausible for the document type, treat it as supporting evidence. For trade documents, mainland licensing bodies such as Department of Economy and Tourism, Department of Economic Development, DED, DET, ADDED, SEDD, and common free-zone authorities such as JAFZA, DAFZA, IFZA, RAKEZ/KEZAD/KIZAD, DMCC, DIFC, Dubai South, Meydan Free Zone, Dubai Silicon Oasis, Hamriyah Free Zone, Sharjah Airport International Free Zone, SAIF Zone, Fujairah Free Zone, and Umm Al Quwain Free Trade Zone should be treated as valid authority evidence. For VAT, Federal Tax Authority / FTA / الهيئة الاتحادية للضرائب is the expected authority. For bank documents, the bank, branch, or financial institution name is the expected authority evidence. Do not treat one malformed email domain, truncated authority name, or other OCR artifact as fraud by itself. Only lower plausibility sharply when multiple signals agree that the document is fake, tampered with, template-like, or internally contradictory. If fraud risk is present, lower plausibility_score and say so directly in anomalies and reasoning.\n\n"
+        "llm_extraction: extract the key document fields exactly as they appear in the raw OCR/document analysis JSON. Do not guess or invent. Trim whitespace only. For issuing_authority, prefer the specific licensing or tax authority field tied to the document's primary license/details block. For trade documents, choose the actual issuing licensing body over a generic government header whenever both appear; mainland examples include Department of Economy and Tourism, Department of Economic Development, DED, DET, ADDED, and SEDD, while free-zone examples include JAFZA, DAFZA, IFZA, RAKEZ/KEZAD/KIZAD, DMCC, DIFC, Dubai South, Meydan Free Zone, Dubai Silicon Oasis, Hamriyah Free Zone, Sharjah Airport International Free Zone, SAIF Zone, Fujairah Free Zone, and Umm Al Quwain Free Trade Zone. For VAT, prefer Federal Tax Authority / FTA / الهيئة الاتحادية للضرائب. For bank documents, prefer the bank or financial institution name. Do not use footer verification text, chamber footer text, or marketing text unless no better authority is present. If multiple authority-like strings appear, choose the one tied to the document's primary license/details block.\n\n"
         "Return ONLY valid JSON. No markdown. No explanation.\n"
         "Use this exact output schema:\n"
         "{\n"
@@ -690,6 +712,7 @@ def _combined_system_prompt() -> str:
         '    "expiry_date": {"value": null, "confidence": null},\n'
         '    "is_expired": {"value": null, "confidence": null},\n'
         '    "company_name": {"value": null, "confidence": null},\n'
+        '    "issuing_authority": {"value": null, "confidence": null},\n'
         '    "bank_name": {"value": null, "confidence": null},\n'
         '    "account_number": {"value": null, "confidence": null},\n'
         '    "iban": {"value": null, "confidence": null},\n'

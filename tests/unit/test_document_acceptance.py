@@ -13,6 +13,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             }
         }
 
@@ -28,6 +29,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "CompanyName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             }
         }
 
@@ -43,14 +45,15 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             },
             "qr_codes": {"value": ["https://example.com/qr"]},
             "verification_urls": {"value": ["https://example.com/verify"]},
         }
 
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
-        self.assertEqual(result.status, "approved")
-        self.assertEqual(result.score, 100)
+        self.assertEqual(result.status, "review")
+        self.assertEqual(result.score, 90)
         self.assertIn("QR code present.", result.reasons)
         self.assertIn("Verification URL present.", result.reasons)
         self.assertEqual(result.expiry_date, "2027-04-06")
@@ -62,6 +65,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             },
             "gpt_review": {
                 "is_consistent": True,
@@ -73,8 +77,8 @@ class DocumentAcceptanceTest(unittest.TestCase):
 
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
         self.assertEqual(result.status, "rejected")
-        self.assertIn("Expert review contribution: +12.", result.reasons)
-        self.assertEqual(result.score, 72)
+        self.assertIn("Expert review contribution: +4.", result.reasons)
+        self.assertEqual(result.score, 74)
         self.assertEqual(result.expiry_date, "2027-04-06")
         self.assertFalse(result.is_expired)
 
@@ -84,6 +88,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             },
             "gpt_review": {
                 "is_consistent": False,
@@ -97,7 +102,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
         self.assertEqual(result.status, "rejected")
         self.assertIn("Expert review unavailable: Missing review configuration.", result.reasons)
-        self.assertEqual(result.score, 60)
+        self.assertEqual(result.score, 70)
         self.assertEqual(result.expiry_date, "2027-04-06")
         self.assertFalse(result.is_expired)
 
@@ -108,13 +113,14 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             }
         }
 
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21), file_bytes=b"%PDF-1.4")
         self.assertEqual(result.status, "rejected")
         self.assertIn("Logo present.", result.reasons)
-        self.assertEqual(result.score, 70)
+        self.assertEqual(result.score, 75)
         self.assertEqual(result.expiry_date, "2027-04-06")
         self.assertFalse(result.is_expired)
         mock_logo.assert_called_once()
@@ -126,6 +132,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             },
             "gpt_review": {
                 "is_consistent": True,
@@ -136,13 +143,69 @@ class DocumentAcceptanceTest(unittest.TestCase):
         }
 
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21), file_bytes=b"%PDF-1.4")
-        self.assertEqual(result.status, "review")
+        self.assertEqual(result.status, "rejected")
         self.assertIn("Logo present.", result.reasons)
-        self.assertIn("Expert review contribution: +15.", result.reasons)
-        self.assertEqual(result.score, 85)
+        self.assertIn("Expert review contribution: +5.", result.reasons)
+        self.assertEqual(result.score, 80)
         self.assertEqual(result.expiry_date, "2027-04-06")
         self.assertFalse(result.is_expired)
         mock_logo.assert_called_once()
+
+    def test_trade_license_scores_issuing_authority_bonus(self) -> None:
+        payload = {
+            "results": {
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
+                "ExpiryDate": {"value": "06/04/2027"},
+                "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
+            },
+            "qr_codes": {"value": ["https://example.com/qr"]},
+            "verification_urls": {"value": ["https://example.com/verify"]},
+        }
+
+        result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
+        self.assertEqual(result.status, "review")
+        self.assertEqual(result.score, 90)
+        self.assertTrue(any("Issuing authority present" in reason for reason in result.reasons))
+
+    def test_trade_license_scores_common_free_zone_authority_bonus(self) -> None:
+        payload = {
+            "results": {
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
+                "ExpiryDate": {"value": "06/04/2027"},
+                "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "JAFZA"},
+            },
+            "qr_codes": {"value": ["https://example.com/qr"]},
+            "verification_urls": {"value": ["https://example.com/verify"]},
+        }
+
+        result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
+        self.assertEqual(result.status, "review")
+        self.assertEqual(result.score, 90)
+        self.assertTrue(any("Issuing authority present" in reason for reason in result.reasons))
+
+    def test_trade_license_rejects_when_gpt_review_flags_fraud_risk(self) -> None:
+        payload = {
+            "results": {
+                "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
+                "ExpiryDate": {"value": "06/04/2027"},
+                "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
+            },
+            "gpt_review": {
+                "is_consistent": False,
+                "anomalies": ["Document looks tampered or template-like."],
+                "plausibility_score": 0.92,
+                "reasoning": "Suspicious document.",
+            },
+        }
+
+        result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21))
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 0)
+        self.assertIn("document_authenticity", result.missing_fields)
+        self.assertTrue(any("fraud risk" in reason.lower() for reason in result.reasons))
 
     def test_trade_license_rejects_when_requested_company_does_not_match(self) -> None:
         payload = {
@@ -150,6 +213,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             },
             "qr_codes": {"value": ["https://example.com/qr"]},
             "verification_urls": {"value": ["https://example.com/verify"]},
@@ -180,6 +244,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "Eurocon Building Industries FZE"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             },
             "qr_codes": {"value": ["https://example.com/qr"]},
             "verification_urls": {"value": ["https://example.com/verify"]},
@@ -211,6 +276,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "BankName": {"value": "Commercial Bank of Dubai"},
                 "AccountNumber": {"value": "1000078384"},
                 "IBAN": {"value": "AE030230000001000078384"},
+                "IssuingAuthority": {"value": "Commercial Bank of Dubai"},
             }
         }
 
@@ -229,6 +295,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "BankName": {"value": "Commercial Bank of Dubai"},
                 "AccountNumber": {"value": "1000078384"},
                 "IBAN": {"value": "AE030230000001000078384"},
+                "IssuingAuthority": {"value": "Commercial Bank of Dubai"},
             },
             "gpt_review": {
                 "is_consistent": True,
@@ -252,13 +319,14 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2027"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             }
         }
 
         result = evaluate_document_acceptance("trade", payload, today=date(2026, 6, 21), file_bytes=b"%PDF-1.4")
         self.assertEqual(result.status, "rejected")
         self.assertIn("Logo not found.", result.reasons)
-        self.assertEqual(result.score, 60)
+        self.assertEqual(result.score, 70)
         self.assertEqual(result.expiry_date, "2027-04-06")
         self.assertFalse(result.is_expired)
         mock_logo.assert_called_once()
@@ -284,6 +352,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "CONSTRUCTION MACHINERY CENTER CO.(L.L.C.)"},
                 "ExpiryDate": {"value": "06/04/2026"},
                 "LicenceActivities": {"value": "Construction Equipment Trading"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             }
         }
 
@@ -300,6 +369,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "Sanath Swaroop Mulky CO"},
                 "ExpiryDate": {"value": "31 December 2026"},
                 "LicenceActivities": {"value": "Information Technology Consultancy"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             }
         }
 
@@ -323,6 +393,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                         "TradeName": {"value": "Sanath Swaroop Mulky CO"},
                         "ExpiryDate": payload_entry["ExpiryDate"],
                         "LicenceActivities": {"value": "Information Technology Consultancy"},
+                        "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
                     }
                 }
                 result = evaluate_document_acceptance("trade", payload, today=date(2026, 1, 1))
@@ -335,6 +406,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "TradeName": {"value": "Sanath Swaroop Mulky CO"},
                 "ExpiryDate": {"value": "December 31, 2026"},
                 "LicenceActivities": {"value": "Information Technology Consultancy"},
+                "IssuingAuthority": {"value": "Department of Economy and Tourism, Dubai"},
             }
         }
 
@@ -347,12 +419,13 @@ class DocumentAcceptanceTest(unittest.TestCase):
             "results": {
                 "TaxRegistrationNumber": {"value": "100382292900003"},
                 "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
             }
         }
 
         result = evaluate_document_acceptance("vat", payload)
         self.assertEqual(result.status, "rejected")
-        self.assertEqual(result.score, 60)
+        self.assertEqual(result.score, 70)
         self.assertEqual(result.missing_fields, [])
 
     def test_vat_rejects_missing_company_name(self) -> None:
@@ -367,6 +440,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
             "results": {
                 "TaxRegistrationNumber": {"value": "100382292900003"},
                 "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
             }
         }
 
@@ -385,6 +459,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
             "results": {
                 "TaxRegistrationNumber": {"value": "100382292900003"},
                 "LegalNameEnglish": {"value": "Eurocon Building Industries FZE"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
             }
         }
 
@@ -394,11 +469,32 @@ class DocumentAcceptanceTest(unittest.TestCase):
             requested_company_name="Eurocon Building Industries",
         )
         self.assertEqual(result.status, "rejected")
-        self.assertEqual(result.score, 60)
+        self.assertEqual(result.score, 70)
         self.assertNotIn("company_name_mismatch", result.missing_fields)
 
+    def test_vat_rejects_when_gpt_review_flags_fraud_risk(self) -> None:
+        payload = {
+            "results": {
+                "TaxRegistrationNumber": {"value": "100382292900003"},
+                "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
+            },
+            "gpt_review": {
+                "is_consistent": False,
+                "anomalies": ["Template-like layout and suspicious alterations."],
+                "plausibility_score": 0.95,
+                "reasoning": "Suspicious document.",
+            },
+        }
+
+        result = evaluate_document_acceptance("vat", payload)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 0)
+        self.assertIn("document_authenticity", result.missing_fields)
+        self.assertTrue(any("fraud risk" in reason.lower() for reason in result.reasons))
+
     def test_bank_accepts_company_name(self) -> None:
-        payload = {"results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}}
+        payload = {"results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}, "BankName": {"value": "Commercial Bank of Dubai"}}}
 
         result = evaluate_document_acceptance("bank", payload)
         self.assertEqual(result.status, "rejected")
@@ -407,7 +503,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
 
     @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=True)
     def test_bank_scores_logo_without_qr_or_verification_rules(self, mock_logo: object) -> None:
-        payload = {"results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}}}
+        payload = {"results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}, "BankName": {"value": "Commercial Bank of Dubai"}}}
 
         result = evaluate_document_acceptance("bank", payload, file_bytes=b"%PDF-1.4")
         self.assertEqual(result.status, "review")
@@ -419,7 +515,10 @@ class DocumentAcceptanceTest(unittest.TestCase):
     @patch("app.use_cases.document_acceptance.extract_logo_presence_from_pdf", return_value=False)
     def test_bank_ignores_qr_and_verification_signals(self, mock_logo: object) -> None:
         payload = {
-            "results": {"AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"}},
+            "results": {
+                "AccountName": {"value": "CICON EPOXY AND STEEL CUTTING PLANT LLC SPC"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
+            },
             "qr_codes": {"value": ["https://example.com/qr"]},
             "verification_urls": {"value": ["https://example.com/verify"]},
         }
@@ -444,6 +543,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "BankName": {"value": "Commercial Bank of Dubai"},
                 "AccountNumber": {"value": "1000078384"},
                 "IBAN": {"value": "AE030230000001000078384"},
+                "IssuingAuthority": {"value": "Commercial Bank of Dubai"},
             }
         }
 
@@ -464,6 +564,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
                 "BankName": {"value": "Commercial Bank of Dubai"},
                 "AccountNumber": {"value": "1000078384"},
                 "IBAN": {"value": "AE030230000001000078384"},
+                "IssuingAuthority": {"value": "Commercial Bank of Dubai"},
             }
         }
 
@@ -476,11 +577,65 @@ class DocumentAcceptanceTest(unittest.TestCase):
         self.assertEqual(result.score, 75)
         self.assertNotIn("company_name_mismatch", result.missing_fields)
 
+    def test_vat_scores_issuing_authority_bonus(self) -> None:
+        payload = {
+            "results": {
+                "TaxRegistrationNumber": {"value": "100382292900003"},
+                "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
+            }
+        }
+
+        result = evaluate_document_acceptance("vat", payload)
+        self.assertEqual(result.status, "rejected")
+        self.assertGreaterEqual(result.score, 70)
+        self.assertTrue(any("Issuing authority present" in reason for reason in result.reasons))
+
+    def test_bank_scores_issuing_authority_bonus(self) -> None:
+        payload = {
+            "results": {
+                "AccountName": {"value": "Eurocon Building Industries FZE"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
+                "AccountNumber": {"value": "1000078384"},
+                "IBAN": {"value": "AE030230000001000078384"},
+                "IssuingAuthority": {"value": "Commercial Bank of Dubai"},
+            }
+        }
+
+        result = evaluate_document_acceptance("bank", payload)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 75)
+        self.assertEqual(result.reasons, [])
+
+    def test_bank_rejects_when_gpt_review_flags_fraud_risk(self) -> None:
+        payload = {
+            "results": {
+                "AccountName": {"value": "Eurocon Building Industries FZE"},
+                "BankName": {"value": "Commercial Bank of Dubai"},
+                "AccountNumber": {"value": "1000078384"},
+                "IBAN": {"value": "AE030230000001000078384"},
+                "IssuingAuthority": {"value": "Commercial Bank of Dubai"},
+            },
+            "gpt_review": {
+                "is_consistent": False,
+                "anomalies": ["Fake-looking bank letter and inconsistent issuer details."],
+                "plausibility_score": 0.99,
+                "reasoning": "Suspicious document.",
+            },
+        }
+
+        result = evaluate_document_acceptance("bank", payload)
+        self.assertEqual(result.status, "rejected")
+        self.assertEqual(result.score, 0)
+        self.assertIn("document_authenticity", result.missing_fields)
+        self.assertTrue(any("fraud risk" in reason.lower() for reason in result.reasons))
+
     def test_response_wrapper_returns_frontend_shape(self) -> None:
         payload = {
             "results": {
                 "TaxRegistrationNumber": {"value": "100382292900003"},
                 "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
             }
         }
 
@@ -497,6 +652,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
             "results": {
                 "TaxRegistrationNumber": {"value": "100382292900003"},
                 "LegalNameEnglish": {"value": "GREEN LIFE EQUIPMENT TRADING"},
+                "IssuingAuthority": {"value": "Federal Tax Authority"},
             },
             "llm_extraction": {"document_type": "vat"},
         }
@@ -504,7 +660,7 @@ class DocumentAcceptanceTest(unittest.TestCase):
         result = evaluate_document_acceptance("trade", payload)
         self.assertEqual(result.document_type, "vat")
         self.assertEqual(result.status, "rejected")
-        self.assertEqual(result.score, 60)
+        self.assertEqual(result.score, 70)
 
 
 if __name__ == "__main__":

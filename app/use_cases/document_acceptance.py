@@ -43,6 +43,7 @@ def build_document_acceptance_response(
 _TRADE_LICENSE_NAME_FIELDS = ("TradeName", "CompanyName", "TradeNameEnglish", "OperatingName", "BusinessName")
 _TRADE_LICENSE_EXPIRY_FIELDS = ("ExpiryDate",)
 _TRADE_LICENSE_ACTIVITY_FIELDS = ("LicenceActivities", "LicenseActivities", "License Activities", "Licence Activities")
+_ISSUING_AUTHORITY_FIELDS = ("IssuingAuthority",)
 
 _VAT_NUMBER_FIELDS = ("TaxRegistrationNumber", "TRN", "VATNumber", "VATRegistrationNumber")
 _VAT_NAME_FIELDS = ("LegalNameEnglish", "CompanyName", "LegalName")
@@ -51,6 +52,63 @@ _BANK_NAME_FIELDS = ("AccountName", "CompanyName", "LegalNameEnglish", "Benefici
 
 _AFFECTION_PLAN_PARCEL_FIELDS = ("ParcelId", "ParcelNo", "PlotNumber", "PlotNo")
 _AFFECTION_PLAN_AREA_FIELDS = ("TotalArea", "Area", "LandArea", "PlotArea")
+_GPT_FRAUD_KEYWORDS = ("fake", "tamper", "tampered", "forged", "template", "inconsistent", "fabricated", "suspicious")
+_TRADE_VAT_BASE_SCORE = 50
+_TRADE_VAT_QR_SCORE = 10
+_TRADE_VAT_VERIFICATION_SCORE = 10
+_TRADE_VAT_LOGO_SCORE = 5
+_TRADE_VAT_ISSUING_AUTHORITY_SCORE = 20
+_TRADE_VAT_GPT_MAX_SCORE = 5
+_BANK_BASE_SCORE = 75
+_BANK_LOGO_SCORE = 10
+_BANK_GPT_MAX_SCORE = 15
+_TRADE_ISSUING_AUTHORITY_ALLOWLIST = (
+    "department of economy and tourism",
+    "department of economic development",
+    "economic development",
+    "economy and tourism",
+    "ded",
+    "det",
+    "added",
+    "sedd",
+    "ajman ded",
+    "rakez",
+    "dmcc",
+    "jafza",
+    "jebel ali free zone",
+    "jebel ali free zone authority",
+    "dafza",
+    "dubai airport free zone",
+    "ifza",
+    "international free zone authority",
+    "meydan free zone",
+    "dubai south",
+    "dtec",
+    "dubai silicon oasis",
+    "difc",
+    "kizad",
+    "kezad",
+    "hamriyah free zone",
+    "sharjah airport international free zone",
+    "saif zone",
+    "sharjah free zone",
+    "fujairah free zone",
+    "umm al quwain free trade zone",
+    "uaq free trade zone",
+    "ras al khaimah economic zone",
+    "free zone authority",
+    "free zone",
+    "freezone",
+)
+_VAT_ISSUING_AUTHORITY_ALLOWLIST = (
+    "federal tax authority",
+    "fta",
+)
+_BANK_ISSUING_AUTHORITY_ALLOWLIST = (
+    "bank",
+    "branch",
+    "financial institution",
+)
 
 
 def evaluate_document_acceptance(
@@ -108,15 +166,14 @@ def _evaluate_trade_license(
     if requested_company_name and trade_name:
         comparison = compare_company_names(requested_company_name, trade_name)
         if not comparison.exact_match:
-            reasons.append(
-                f"Requested company name '{requested_company_name}' does not match uploaded trade license company name '{trade_name}'."
-            )
             missing_fields.append("company_name_mismatch")
             return _result(
                 "trade",
                 "rejected",
                 missing_fields,
-                reasons,
+                [
+                    f"Requested company name '{requested_company_name}' does not match uploaded trade license company name '{trade_name}'."
+                ],
                 score_override=0,
                 expiry_date=expiry_date,
                 is_expired=bool(expiry_date is not None and expiry_date < today),
@@ -125,37 +182,29 @@ def _evaluate_trade_license(
     if missing_fields:
         return _result("trade", "rejected", missing_fields, reasons, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
 
-    score = 60
-    if _signal_present(payload, "qr_codes"):
-        score += 20
-        reasons.append("QR code present.")
-    else:
-        reasons.append("QR code not found.")
-    if _signal_present(payload, "verification_urls"):
-        score += 20
-        reasons.append("Verification URL present.")
-    else:
-        reasons.append("Verification URL not found.")
+    fraud_risk_reason = _gpt_fraud_risk_reason(payload)
+    if fraud_risk_reason is not None:
+        return _result(
+            "trade",
+            "rejected",
+            ["document_authenticity"],
+            [fraud_risk_reason],
+            score_override=0,
+            expiry_date=expiry_date,
+            is_expired=bool(expiry_date is not None and expiry_date < today),
+        )
 
-    if file_bytes is not None:
-        if extract_logo_presence_from_pdf(file_bytes):
-            score += 10
-            reasons.append("Logo present.")
-        else:
-            reasons.append("Logo not found.")
-
-    gpt_review = _gpt_review(payload)
-    if gpt_review is not None:
-        if gpt_review.get("skipped"):
-            reasons.append(f"Expert review unavailable: {gpt_review.get('reasoning') or 'not configured'}.")
-        else:
-            gpt_score = _gpt_review_weight(gpt_review)
-            score += gpt_score
-            score = min(score, 100)
-            reasons.append(f"Expert review contribution: +{gpt_score}.")
-
-    score = min(score, 100)
-    return _result("trade", _status_from_score(score), [], reasons, score_override=score, expiry_date=expiry_date, is_expired=bool(expiry_date is not None and expiry_date < today))
+    authority_validation = _validate_issuing_authority("trade", results)
+    authority_text, authority_bonus = authority_validation if authority_validation is not None else (None, None)
+    return _score_with_signals(
+        "trade",
+        payload,
+        file_bytes=file_bytes,
+        authority_text=authority_text,
+        authority_bonus=authority_bonus,
+        expiry_date=expiry_date,
+        is_expired=bool(expiry_date is not None and expiry_date < today),
+    )
 
 
 def _evaluate_vat(
@@ -191,7 +240,14 @@ def _evaluate_vat(
                 score_override=0,
             )
 
-    return _score_with_signals("vat", payload, file_bytes=file_bytes)
+    fraud_risk_reason = _gpt_fraud_risk_reason(payload)
+    if fraud_risk_reason is not None:
+        return _result("vat", "rejected", ["document_authenticity"], [fraud_risk_reason], score_override=0)
+
+    authority_validation = _validate_issuing_authority("vat", results)
+    authority_text, authority_bonus = authority_validation if authority_validation is not None else (None, None)
+
+    return _score_with_signals("vat", payload, file_bytes=file_bytes, authority_text=authority_text, authority_bonus=authority_bonus)
 
 
 def _evaluate_bank(
@@ -224,6 +280,10 @@ def _evaluate_bank(
                 score_override=0,
             )
 
+    fraud_risk_reason = _gpt_fraud_risk_reason(payload)
+    if fraud_risk_reason is not None:
+        return _result("bank", "rejected", ["document_authenticity"], [fraud_risk_reason], score_override=0)
+
     return _score_bank_with_logo_and_gpt(payload, file_bytes=file_bytes)
 
 
@@ -246,31 +306,51 @@ def _evaluate_affection_plan(
     if missing_fields:
         return _result("affection_plan", "rejected", missing_fields, [])
 
+    fraud_risk_reason = _gpt_fraud_risk_reason(payload)
+    if fraud_risk_reason is not None:
+        return _result("affection_plan", "rejected", ["document_authenticity"], [fraud_risk_reason], score_override=0)
+
     return _score_with_signals("affection_plan", payload, file_bytes=file_bytes)
 
 
-def _score_with_signals(document_type: str, payload: dict[str, Any], file_bytes: bytes | None = None) -> DocumentAcceptanceResult:
-    score = 60
+def _score_with_signals(
+    document_type: str,
+    payload: dict[str, Any],
+    file_bytes: bytes | None = None,
+    authority_text: str | None = None,
+    authority_bonus: int | None = None,
+    expiry_date: date | None = None,
+    is_expired: bool | None = None,
+) -> DocumentAcceptanceResult:
+    score = _TRADE_VAT_BASE_SCORE
     reasons: list[str] = []
 
     if _signal_present(payload, "qr_codes"):
-        score += 20
+        score += _TRADE_VAT_QR_SCORE
         reasons.append("QR code present.")
     else:
         reasons.append("QR code not found.")
 
     if _signal_present(payload, "verification_urls"):
-        score += 20
+        score += _TRADE_VAT_VERIFICATION_SCORE
         reasons.append("Verification URL present.")
     else:
         reasons.append("Verification URL not found.")
 
     if file_bytes is not None:
         if extract_logo_presence_from_pdf(file_bytes):
-            score += 10
+            score += _TRADE_VAT_LOGO_SCORE
             reasons.append("Logo present.")
         else:
             reasons.append("Logo not found.")
+
+    if authority_bonus is None:
+        authority_validation = _validate_issuing_authority(document_type, _results_section(payload))
+        if authority_validation is not None:
+            authority_text, authority_bonus = authority_validation
+    if authority_bonus:
+        score += authority_bonus
+        reasons.append(f"Issuing authority present: {authority_text}. Expert boost: +{authority_bonus}.")
 
     gpt_review = _gpt_review(payload)
     if gpt_review is not None:
@@ -279,20 +359,21 @@ def _score_with_signals(document_type: str, payload: dict[str, Any], file_bytes:
         else:
             gpt_score = _gpt_review_weight(gpt_review)
             score += gpt_score
-            score = min(score, 100)
             reasons.append(f"Expert review contribution: +{gpt_score}.")
 
-    score = min(score, 100)
-    return _result(document_type, _status_from_score(score), [], reasons, score_override=score)
+    return _result(document_type, _status_from_score(score), [], reasons, score_override=score, expiry_date=expiry_date, is_expired=is_expired)
 
 
-def _score_bank_with_logo_and_gpt(payload: dict[str, Any], file_bytes: bytes | None = None) -> DocumentAcceptanceResult:
-    score = 75
+def _score_bank_with_logo_and_gpt(
+    payload: dict[str, Any],
+    file_bytes: bytes | None = None,
+) -> DocumentAcceptanceResult:
+    score = _BANK_BASE_SCORE
     reasons: list[str] = []
 
     if file_bytes is not None:
         if extract_logo_presence_from_pdf(file_bytes):
-            score += 10
+            score += _BANK_LOGO_SCORE
             reasons.append("Logo present.")
         else:
             reasons.append("Logo not found.")
@@ -302,13 +383,25 @@ def _score_bank_with_logo_and_gpt(payload: dict[str, Any], file_bytes: bytes | N
         if gpt_review.get("skipped"):
             reasons.append(f"Expert review unavailable: {gpt_review.get('reasoning') or 'not configured'}.")
         else:
-            gpt_score = _gpt_review_weight(gpt_review)
+            gpt_score = _bank_gpt_review_weight(gpt_review)
             score += gpt_score
-            score = min(score, 100)
             reasons.append(f"Expert review contribution: +{gpt_score}.")
 
     score = min(score, 100)
     return _result("bank", _status_from_score(score), [], reasons, score_override=score)
+
+
+def _bank_gpt_review_weight(gpt_review: dict[str, Any]) -> int:
+    plausibility = gpt_review.get("plausibility_score")
+    try:
+        score = float(plausibility)
+    except (TypeError, ValueError):
+        score = 0.0
+    if score < 0:
+        score = 0.0
+    if score > 1:
+        score = 1.0
+    return round(_BANK_GPT_MAX_SCORE * score)
 
 
 def _result(
@@ -362,6 +455,69 @@ def _gpt_review(payload: dict[str, Any]) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _gpt_fraud_risk_reason(payload: dict[str, Any]) -> str | None:
+    gpt_review = _gpt_review(payload)
+    if gpt_review is None or gpt_review.get("skipped"):
+        return None
+    try:
+        plausibility = float(gpt_review.get("plausibility_score"))
+    except (TypeError, ValueError):
+        plausibility = 0.0
+    if plausibility >= 0.4:
+        anomalies = gpt_review.get("anomalies")
+        if not isinstance(anomalies, list):
+            return None
+        suspicious_anomaly = _first_suspicious_anomaly(anomalies)
+        if suspicious_anomaly is None:
+            return None
+        return f"GPT review indicates fraud risk: {suspicious_anomaly}"
+    anomalies = gpt_review.get("anomalies")
+    suspicious_anomaly = _first_suspicious_anomaly(anomalies if isinstance(anomalies, list) else [])
+    if suspicious_anomaly is not None:
+        return f"GPT review indicates fraud risk: {suspicious_anomaly}"
+    return "GPT review plausibility score is too low."
+
+
+def _validate_issuing_authority(document_type: str, results: dict[str, Any]) -> tuple[str, int] | None:
+    authority = _normalize_text(_first_value(results, _authority_fields_for_document(document_type)))
+    if not authority:
+        return None
+    lowered = authority.lower()
+    if document_type == "trade":
+        if _matches_allowlist(lowered, _TRADE_ISSUING_AUTHORITY_ALLOWLIST):
+            return authority, _TRADE_VAT_ISSUING_AUTHORITY_SCORE
+        return None
+    if document_type == "vat":
+        if _matches_allowlist(lowered, _VAT_ISSUING_AUTHORITY_ALLOWLIST):
+            return authority, _TRADE_VAT_ISSUING_AUTHORITY_SCORE
+        return None
+    if document_type == "bank":
+        if _matches_allowlist(lowered, _BANK_ISSUING_AUTHORITY_ALLOWLIST):
+            return authority, 3
+        return None
+    return None
+
+
+def _authority_fields_for_document(document_type: str) -> tuple[str, ...]:
+    if document_type == "bank":
+        return ("IssuingAuthority", "BankName")
+    return _ISSUING_AUTHORITY_FIELDS
+
+
+def _matches_allowlist(value: str, allowlist: Iterable[str]) -> bool:
+    return any(token in value for token in allowlist)
+
+
+def _first_suspicious_anomaly(anomalies: list[Any]) -> str | None:
+    for anomaly in anomalies:
+        if not isinstance(anomaly, str):
+            continue
+        lowered = anomaly.lower()
+        if any(keyword in lowered for keyword in _GPT_FRAUD_KEYWORDS):
+            return anomaly
+    return None
+
+
 def _gpt_review_weight(gpt_review: dict[str, Any]) -> int:
     plausibility = gpt_review.get("plausibility_score")
     try:
@@ -372,7 +528,7 @@ def _gpt_review_weight(gpt_review: dict[str, Any]) -> int:
         score = 0.0
     if score > 1:
         score = 1.0
-    return round(15 * score)
+    return round(_TRADE_VAT_GPT_MAX_SCORE * score)
 
 
 def _status_from_score(score: int) -> str:
