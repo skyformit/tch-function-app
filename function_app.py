@@ -1,7 +1,7 @@
 import importlib
 
-from azurefunctions.extensions.http.fastapi import JSONResponse, Request, StreamingResponse  # noqa: F401
-from core.app import app  # noqa: F401
+from azurefunctions.extensions.http.fastapi import JSONResponse, Request, StreamingResponse
+from core.app import app
 
 for module_name in (
     "app.interfaces.http.additional_document_routes",

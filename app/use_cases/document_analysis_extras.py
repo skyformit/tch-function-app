@@ -12,6 +12,8 @@ except ImportError:  # pragma: no cover - dependency may be absent in some local
     AzureOpenAI = None
 
 from app.core.document_settings import (
+    document_analysis_combined_openai_system_prompt,
+    document_analysis_extraction_openai_system_prompt,
     document_review_openai_api_key,
     document_review_openai_api_version,
     document_review_openai_deployment_name,
@@ -222,270 +224,45 @@ def _raw_result_content_only(raw_result: Any) -> Any:
 
 
 def _extraction_system_prompt() -> str:
-    return (
-    "You are a highly accurate document extraction engine specialized in OCR outputs from Trade Licenses, VAT Certificates, Bank Letters, Bank Certificates, and other supplier onboarding documents.\n\n"
+    return document_analysis_extraction_openai_system_prompt()
 
-    "You will receive raw OCR or document analysis content extracted from PDFs, scanned images, or digital documents.\n\n"
+def _review_max_tokens() -> int:
+    return max(document_review_openai_min_tokens(), document_review_openai_max_tokens())
 
-    "Your task is to extract structured information from the document and return ONLY valid JSON.\n\n"
 
-    "GENERAL PRINCIPLES\n"
-    "- Extract information ONLY from the provided document text.\n"
-    "- Never use external knowledge.\n"
-    "- Never infer, fabricate, guess, complete, or hallucinate information.\n"
-    "- Search the ENTIRE document before determining that a field is unavailable.\n"
-    "- Perform semantic matching, not only exact label matching.\n"
-    "- Support multilingual documents including English, Arabic, and mixed-language documents.\n"
-    "- Preserve extracted values exactly as they appear in the document.\n"
-    "- Normalize whitespace only.\n"
-    "- Do not reformat dates, names, account numbers, VAT numbers, license numbers, IBANs, or other extracted values.\n"
-    "- If multiple candidate values are found, build an internal candidate list and select the best match.\n"
-    "- Prefer values closest to the associated field label.\n"
-    "- Prefer complete values over partial values.\n"
-    "- Prefer machine-readable values over fragmented OCR fragments.\n"
-    "- If a value cannot be identified with reasonable confidence, return null.\n\n"
+def _combined_messages(raw_result: Any, extracted_fields: dict[str, Any], today: date, context_hint: Optional[str] = None) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": _combined_system_prompt()},
+        {
+            "role": "user",
+            "content": (
+                _document_context_block(context_hint)
+                + f"Today: {today.isoformat()}\n\n"
+                f"Extracted fields:\n{json.dumps(extracted_fields, indent=2, ensure_ascii=False)}\n\n"
+                f"Raw document analysis content:\n{json.dumps(_raw_result_content_only(raw_result), indent=2, ensure_ascii=False)}"
+            ),
+        },
+    ]
 
-    "DOCUMENT CLASSIFICATION\n"
-    "- Determine the document type using document content.\n"
-    "- Allowed values: trade, vat, bank_certificate, bank_offer, bank, unknown.\n"
-    "- Use bank_certificate for bank letters / certificates / statements.\n"
-    "- Use bank_offer for bank offer letters or offer documents.\n"
-    "- Use bank when the document is clearly a generic bank document and the subtype is not obvious.\n"
-    "- If uncertain, use unknown.\n\n"
 
-    "FIELD MATCHING STRATEGY\n"
-    "- Do not rely only on exact field names.\n"
-    "- Match semantic equivalents, OCR variations, abbreviations, multilingual labels, and synonyms.\n"
-    "- Always attempt to find the closest matching field before returning null.\n"
-    "- If no reliable match exists, return null.\n\n"
+def _combined_system_prompt() -> str:
+    return document_analysis_combined_openai_system_prompt()
 
-    "FIELD SYNONYMS\n\n"
-
-    "trade_license_number:\n"
-    "- License No\n"
-    "- Licence No\n"
-    "- Trade License No\n"
-    "- Trade Licence No\n"
-    "- Commercial License No\n"
-    "- Industrial License No\n"
-    "- Registration License No\n"
-    "- Permit Number\n"
-    "- License Number\n"
-    "- Licence Number\n"
-    "- Registration Number\n"
-    "- Registration No\n"
-    "- Commercial Registration Number\n"
-    "- CR Number\n"
-    "- رقم الرخصة\n"
-    "- رقم التسجيل\n\n"
-
-    "company_name:\n"
-    "- Company Name\n"
-    "- Legal Entity Name\n"
-    "- Entity Name\n"
-    "- Licensee\n"
-    "- Establishment Name\n"
-    "- Organization Name\n"
-    "- Registered Name\n"
-    "- Business Name\n"
-    "- Corporate Name\n"
-    "- صاحب الرخصة\n"
-    "- اسم الشركة\n\n"
-    "- Return the full legal company name only.\n"
-    "- Do not return partial fragments, trailing suffix lines, or standalone legal suffixes.\n"
-    "- If the company name is split across lines, combine the lines when they clearly belong together.\n"
-    "- Prefer the longest complete name that still looks like a real company name.\n"
-    "- Do not return values like \"INDUSTRIES L.L.C\", \"LLC\", \"CO.\", \"BRANCH\", \"ESTABLISHMENT\", \"SOLE PROPRIETORSHIP\", or \"TRADING\" when they are only trailing fragment lines.\n"
-    "- If only a fragment is present, return null.\n\n"
-
-    "operating_name:\n"
-    "- Operating Name\n"
-    "- Trade Name\n"
-    "- Commercial Name\n"
-    "- Trading Name\n"
-    "- Brand Name\n"
-    "- الاسم التجاري\n\n"
-    "- Return the full operating/trade name only.\n"
-    "- Do not return partial fragments or trailing legal suffix lines.\n"
-    "- If the trade name is split across lines, combine the lines when they clearly belong together.\n"
-    "- Prefer the longest complete name that still looks like a real company name.\n"
-    "- Do not return trailing fragment lines such as \"SOLE PROPRIETORSHIP\" or \"TRADING\" when they are only suffix text.\n"
-    "- If only a fragment is present, return null.\n\n"
-
-    "expiry_date:\n"
-    "- Expiry Date\n"
-    "- Expiration Date\n"
-    "- Valid Until\n"
-    "- Valid Till\n"
-    "- License Expiry\n"
-    "- Date of Expiry\n"
-    "- Renewal Date\n"
-    "- تاريخ الانتهاء\n\n"
-
-    "issue_date:\n"
-    "- Issue Date\n"
-    "- Date of Issue\n"
-    "- Issued On\n"
-    "- License Date\n"
-    "- Registration Date\n"
-    "- تاريخ الإصدار\n\n"
-
-    "issuing_authority:\n"
-    "- Issuing Authority\n"
-    "- Authority\n"
-    "- Issued By\n"
-    "- License Issuing Authority\n"
-    "- Registration Authority\n"
-    "- Department\n"
-    "- جهة الترخيص\n"
-    "- جهة الإصدار\n"
-    "- صادر عن\n\n"
-    "- For trade licenses, prefer the actual licensing body over a generic government header.\n"
-    "- Mainland examples include Department of Economy and Tourism, Department of Economic Development, DED, DET, ADDED, SEDD, and similar emirate licensing bodies.\n"
-    "- Free zone examples include JAFZA, DAFZA, IFZA, RAKEZ/KEZAD/KIZAD, DMCC, DIFC, Dubai South, Meydan Free Zone, Dubai Silicon Oasis, Hamriyah Free Zone, Sharjah Airport International Free Zone, SAIF Zone, Fujairah Free Zone, Umm Al Quwain Free Trade Zone, and similar free-zone authorities.\n"
-    "- For VAT documents, prefer Federal Tax Authority / FTA / الهيئة الاتحادية للضرائب.\n"
-    "- If the document shows a generic header such as Government of Dubai and also shows a more specific licensing body in the license details section, choose the more specific licensing body.\n"
-    "- If only a generic header is present and no specific licensing body can be identified, return that generic header only as a fallback.\n\n"
-
-    "vat_number:\n"
-    "- VAT Number\n"
-    "- VAT Registration Number\n"
-    "- TRN\n"
-    "- Tax Registration Number\n"
-    "- Tax Registration No\n"
-    "- VAT Registration No\n"
-    "- رقم التسجيل الضريبي\n\n"
-
-    "bank_name:\n"
-    "- Bank Name\n"
-    "- Banker\n"
-    "- Banking Institution\n"
-    "- Financial Institution\n"
-    "- Bank\n"
-    "- اسم البنك\n\n"
-
-    "account_number:\n"
-    "- Account Number\n"
-    "- Account No\n"
-    "- A/C Number\n"
-    "- Customer Account Number\n"
-    "- Bank Account Number\n"
-    "- رقم الحساب\n\n"
-
-    "iban:\n"
-    "- IBAN\n"
-    "- International Bank Account Number\n"
-    "- IBAN Number\n"
-    "- رقم الآيبان\n\n"
-
-    "official_email:\n"
-    "- Email\n"
-    "- Official Email\n"
-    "- Contact Email\n"
-    "- Corporate Email\n"
-    "- E-mail\n"
-    "- البريد الإلكتروني\n\n"
-
-    "official_mobile:\n"
-    "- Mobile\n"
-    "- Phone\n"
-    "- Telephone\n"
-    "- Contact Number\n"
-    "- Official Mobile\n"
-    "- Mobile Number\n"
-    "- رقم الهاتف\n"
-    "- الجوال\n\n"
-
-    "license_activities:\n"
-    "- Activities\n"
-    "- Business Activities\n"
-    "- Licensed Activities\n"
-    "- Commercial Activities\n"
-    "- Industrial Activities\n"
-    "- Activity\n"
-    "- النشاط\n"
-    "- الأنشطة\n\n"
-
-    "MULTILINGUAL SUPPORT\n"
-    "- Documents may contain English, Arabic, or mixed-language content.\n"
-    "- Use labels from either language.\n"
-    "- Extract the value regardless of the language used.\n\n"
-
-    "CONFIDENCE SCORING\n"
-    "- Confidence must reflect extraction certainty.\n"
-    "- Use numeric values between 0.00 and 1.00.\n"
-    "- 0.95–1.00: Explicit label and clear value association.\n"
-    "- 0.80–0.94: Strong semantic match with minor OCR noise.\n"
-    "- 0.60–0.79: Likely correct but multiple candidates exist.\n"
-    "- Below 0.60: Return null instead of the value.\n"
-    "- If value is null, confidence must also be null.\n\n"
-
-    "DATE HANDLING\n"
-    "- Extract dates exactly as shown.\n"
-    "- Do not reformat dates.\n"
-    "- Examples:\n"
-    "  - 29/11/2000\n"
-    "  - 2027-01-10\n"
-    "  - 10 JAN 2027\n\n"
-
-    "IS_EXPIRED\n"
-    "- Calculate only if a valid expiry date is found.\n"
-    "- If expiry date is before today's date, return true.\n"
-    "- If expiry date is today or later, return false.\n"
-    "- If expiry date is unavailable, return null.\n"
-    "- Confidence should reflect certainty of the expiry date extraction.\n\n"
-
-    "QR CODE EXTRACTION\n"
-    "- Extract QR payload values if explicitly present in OCR text.\n"
-    "- Extract embedded verification references.\n"
-    "- Remove duplicates.\n"
-    "- Return an empty array if none are found.\n\n"
-
-    "VERIFICATION URL EXTRACTION\n"
-    "- Extract all verification URLs.\n"
-    "- Extract validation portals.\n"
-    "- Extract authenticity verification links.\n"
-    "- Remove duplicates.\n"
-    "- Return an empty array if none are found.\n\n"
-
-    "INTERNAL EXTRACTION PROCESS\n"
-    "- First scan the entire document.\n"
-    "- Build an internal candidate list for each field.\n"
-    "- Evaluate label proximity.\n"
-    "- Evaluate semantic similarity.\n"
-    "- Evaluate OCR confidence.\n"
-    "- Select the strongest candidate.\n"
-    "- Only return values that meet the confidence threshold.\n"
-    "- Never expose intermediate reasoning.\n\n"
-
-    "OUTPUT REQUIREMENTS\n"
-    "- Return ONLY valid JSON.\n"
-    "- No markdown.\n"
-    "- No explanations.\n"
-    "- No notes.\n"
-    "- No additional fields.\n"
-    "- Follow the schema exactly.\n\n"
-
-    "Use this exact output schema:\n"
-    "{\n"
-    '  "document_type": "trade|vat|bank_certificate|bank_offer|bank|unknown",\n'
-    '  "trade_license_number": {"value": null, "confidence": null},\n'
-    '  "expiry_date": {"value": null, "confidence": null},\n'
-    '  "is_expired": {"value": null, "confidence": null},\n'
-    '  "company_name": {"value": null, "confidence": null},\n'
-    '  "issuing_authority": {"value": null, "confidence": null},\n'
-    '  "bank_name": {"value": null, "confidence": null},\n'
-    '  "account_number": {"value": null, "confidence": null},\n'
-    '  "iban": {"value": null, "confidence": null},\n'
-    '  "vat_number": {"value": null, "confidence": null},\n'
-    '  "license_activities": {"value": null, "confidence": null},\n'
-    '  "issue_date": {"value": null, "confidence": null},\n'
-    '  "official_email": {"value": null, "confidence": null},\n'
-    '  "official_mobile": {"value": null, "confidence": null},\n'
-    '  "qr_codes": {"value": [], "confidence": null},\n'
-    '  "verification_urls": {"value": [], "confidence": null}\n'
-    "}\n"
-)
+def _parse_combined_output(raw_text: str, today: date) -> dict[str, Any]:
+    cleaned = re.sub(r"^```(json)?|```$", "", raw_text, flags=re.MULTILINE).strip()
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {
+            "gpt_review": _review_failed(raw_text),
+            "llm_extraction": _extraction_failed(raw_text),
+        }
+    gpt_review = parsed.get("gpt_review")
+    llm_extraction = parsed.get("llm_extraction")
+    return {
+        "gpt_review": gpt_review if isinstance(gpt_review, dict) else _review_failed(raw_text),
+        "llm_extraction": _normalize_extraction(llm_extraction if isinstance(llm_extraction, dict) else _extraction_failed(raw_text), today),
+    }
 
 
 def _parse_extraction(raw_text: str) -> dict[str, Any]:
@@ -654,7 +431,6 @@ def review_and_extract_with_azure_openai(
             "llm_extraction": _extraction_failed(str(exc)),
         }
 
-
 def _combined_text(
     client: AzureOpenAI,
     raw_result: Any,
@@ -674,59 +450,6 @@ def _combined_text(
 
 def _review_max_tokens() -> int:
     return max(document_review_openai_min_tokens(), document_review_openai_max_tokens())
-
-
-def _combined_messages(raw_result: Any, extracted_fields: dict[str, Any], today: date, context_hint: Optional[str] = None) -> list[dict[str, str]]:
-    return [
-        {"role": "system", "content": _combined_system_prompt()},
-        {
-            "role": "user",
-            "content": (
-                _document_context_block(context_hint)
-                + f"Today: {today.isoformat()}\n\n"
-                f"Extracted fields:\n{json.dumps(extracted_fields, indent=2, ensure_ascii=False)}\n\n"
-                f"Raw document analysis content:\n{json.dumps(_raw_result_content_only(raw_result), indent=2, ensure_ascii=False)}"
-            ),
-        },
-    ]
-
-
-def _combined_system_prompt() -> str:
-    return (
-        "You are a document intelligence assistant.\n"
-        "You must produce both a document review and a document extraction in a single JSON response.\n\n"
-        "gpt_review: inspect the extracted fields for internal inconsistencies, implausible values, placeholder/test data, date logic errors, formatting that looks machine-altered, or anything that suggests the document is fake, templated, tampered with, or suspicious. Use only internal consistency and plausibility. If a standard issuing authority is present and plausible for the document type, treat it as supporting evidence. For trade documents, mainland licensing bodies such as Department of Economy and Tourism, Department of Economic Development, DED, DET, ADDED, SEDD, and common free-zone authorities such as JAFZA, DAFZA, IFZA, RAKEZ/KEZAD/KIZAD, DMCC, DIFC, Dubai South, Meydan Free Zone, Dubai Silicon Oasis, Hamriyah Free Zone, Sharjah Airport International Free Zone, SAIF Zone, Fujairah Free Zone, and Umm Al Quwain Free Trade Zone should be treated as valid authority evidence. For VAT, Federal Tax Authority / FTA / الهيئة الاتحادية للضرائب is the expected authority. For bank documents, the bank, branch, or financial institution name is the expected authority evidence. Do not treat one malformed email domain, truncated authority name, or other OCR artifact as fraud by itself. Only lower plausibility sharply when multiple signals agree that the document is fake, tampered with, template-like, or internally contradictory. If fraud risk is present, lower plausibility_score and say so directly in anomalies and reasoning.\n\n"
-        "llm_extraction: extract the key document fields exactly as they appear in the raw OCR/document analysis JSON. Do not guess or invent. Trim whitespace only. For issuing_authority, prefer the specific licensing or tax authority field tied to the document's primary license/details block. For trade documents, choose the actual issuing licensing body over a generic government header whenever both appear; mainland examples include Department of Economy and Tourism, Department of Economic Development, DED, DET, ADDED, and SEDD, while free-zone examples include JAFZA, DAFZA, IFZA, RAKEZ/KEZAD/KIZAD, DMCC, DIFC, Dubai South, Meydan Free Zone, Dubai Silicon Oasis, Hamriyah Free Zone, Sharjah Airport International Free Zone, SAIF Zone, Fujairah Free Zone, and Umm Al Quwain Free Trade Zone. For VAT, prefer Federal Tax Authority / FTA / الهيئة الاتحادية للضرائب. For bank documents, prefer the bank or financial institution name. Do not use footer verification text, chamber footer text, or marketing text unless no better authority is present. If multiple authority-like strings appear, choose the one tied to the document's primary license/details block.\n\n"
-        "Return ONLY valid JSON. No markdown. No explanation.\n"
-        "Use this exact output schema:\n"
-        "{\n"
-        '  "gpt_review": {\n'
-        '    "is_consistent": true,\n'
-        '    "anomalies": [],\n'
-        '    "plausibility_score": 0.0,\n'
-        '    "reasoning": ""\n'
-        "  },\n"
-        '  "llm_extraction": {\n'
-        '    "document_type": "trade|vat|bank_certificate|bank_offer|bank|unknown",\n'
-        '    "trade_license_number": {"value": null, "confidence": null},\n'
-        '    "expiry_date": {"value": null, "confidence": null},\n'
-        '    "is_expired": {"value": null, "confidence": null},\n'
-        '    "company_name": {"value": null, "confidence": null},\n'
-        '    "issuing_authority": {"value": null, "confidence": null},\n'
-        '    "bank_name": {"value": null, "confidence": null},\n'
-        '    "account_number": {"value": null, "confidence": null},\n'
-        '    "iban": {"value": null, "confidence": null},\n'
-        '    "vat_number": {"value": null, "confidence": null},\n'
-        '    "license_activities": {"value": null, "confidence": null},\n'
-        '    "issue_date": {"value": null, "confidence": null},\n'
-        '    "official_email": {"value": null, "confidence": null},\n'
-        '    "official_mobile": {"value": null, "confidence": null},\n'
-        '    "operating_name": {"value": null, "confidence": null},\n'
-        '    "qr_codes": {"value": [], "confidence": null},\n'
-        '    "verification_urls": {"value": [], "confidence": null}\n'
-        "  }\n"
-        "}"
-    )
 
 
 def _parse_combined_output(raw_text: str, today: date) -> dict[str, Any]:

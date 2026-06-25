@@ -30,45 +30,9 @@ class DocumentSettings:
     document_review_openai_inter_call_delay_seconds: str = _env("DOCUMENT_REVIEW_OPENAI_INTER_CALL_DELAY_SECONDS", "0")
     document_review_openai_min_tokens: str = _env("DOCUMENT_REVIEW_OPENAI_MIN_TOKENS", "0")
     document_review_openai_max_tokens: str = _env("DOCUMENT_REVIEW_OPENAI_MAX_TOKENS", "4000")
-    document_review_openai_system_prompt: str = _env(
-        "DOCUMENT_REVIEW_OPENAI_SYSTEM_PROMPT",
-        (
-            "You are a document consistency and fraud-risk reviewer.\n\n"
-            "You will receive extracted fields from a document such as a trade license, VAT certificate, or bank letter. "
-            "Your task is to assess internal consistency and document plausibility from the fields provided.\n\n"
-            "Do NOT use external knowledge or guess authenticity from memory. "
-            "Do NOT penalize the document for being bilingual, having multiple official identifiers, or using different field names "
-            "for the same concept unless the values clearly conflict.\n\n"
-            "Review for:\n"
-            "- missing mandatory fields\n"
-            "- conflicting values across fields\n"
-            "- impossible or logically inconsistent dates\n"
-            "- placeholder/test data\n"
-            "- obvious formatting corruption\n"
-            "- duplicate fields with contradictory values\n"
-            "- OCR or extraction noise that changes the meaning\n"
-            "- suspicious, fake, templated, forged, or tampered-looking content\n"
-            "- implausible combinations that reduce document trustworthiness\n\n"
-            "Scoring rules:\n"
-            "- 0.90 to 1.00 = highly consistent, no meaningful issues, no fraud suspicion\n"
-            "- 0.70 to 0.89 = mostly consistent, minor extraction noise only\n"
-            "- 0.40 to 0.69 = some inconsistencies or unclear fields, but still plausibly valid\n"
-            "- 0.00 to 0.39 = major conflicts, implausible values, or strong signs of tampering/fraud\n\n"
-            "Important:\n"
-            "- A low-confidence field is NOT automatically suspicious.\n"
-            "- Multiple identifiers can be valid if they are standard official numbers.\n"
-            "- A future expiry date is valid if it is after the issue date and within a reasonable range.\n"
-            "- If the document contains Arabic and English text, do not treat that as an anomaly by itself.\n"
-            "- If the same concept appears in multiple fields, only flag it if the values conflict.\n\n"
-            "- If a standard official issuing authority is present and plausible for the document type, treat it as supporting evidence, not as a suspicious anomaly.\n"
-            "- Do not mark a document suspicious solely because one field looks imperfect, truncated, or OCR-corrupted (for example a broken email domain or a partially recognized authority name).\n"
-            "- Examples of plausible authorities include a trade license authority such as a Department of Economy and Tourism / Department of Economic Development, a VAT authority such as the Federal Tax Authority, or a bank name / branch for bank documents.\n"
-            "- Only lower plausibility sharply when multiple signals agree that the document is fake, tampered, template-like, or internally contradictory.\n"
-            "- If fraud or tampering is suspected, explain it directly in anomalies and reasoning.\n\n"
-            "Respond with ONLY a JSON object, no markdown fences, no preamble, in this exact shape:\n"
-            '{"is_consistent": true|false, "anomalies": ["..."], "plausibility_score": 0.0-1.0, "reasoning": "short explanation"}'
-        ),
-    )
+    document_analysis_extraction_openai_system_prompt: str = _env("DOCUMENT_ANALYSIS_EXTRACTION_OPENAI_SYSTEM_PROMPT")
+    document_analysis_combined_openai_system_prompt: str = _env("DOCUMENT_ANALYSIS_COMBINED_OPENAI_SYSTEM_PROMPT")
+    document_review_openai_system_prompt: str = _env("DOCUMENT_REVIEW_OPENAI_SYSTEM_PROMPT")
 
 
 settings = DocumentSettings()
@@ -176,3 +140,11 @@ def document_review_openai_max_tokens() -> int:
 
 def document_review_openai_system_prompt() -> str:
     return settings.document_review_openai_system_prompt
+
+
+def document_analysis_extraction_openai_system_prompt() -> str:
+    return settings.document_analysis_extraction_openai_system_prompt
+
+
+def document_analysis_combined_openai_system_prompt() -> str:
+    return settings.document_analysis_combined_openai_system_prompt

@@ -4,6 +4,23 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Iterable, Optional
 
+from app.core.document_policy import (
+    approved_threshold,
+    bank_base_score,
+    bank_gpt_max_score,
+    bank_issuing_authority_allowlist,
+    bank_issuing_authority_score,
+    bank_logo_score,
+    review_threshold,
+    trade_issuing_authority_allowlist,
+    trade_vat_base_score,
+    trade_vat_gpt_max_score,
+    trade_vat_issuing_authority_score,
+    trade_vat_logo_score,
+    trade_vat_qr_score,
+    trade_vat_verification_score,
+    vat_issuing_authority_allowlist,
+)
 from app.infrastructure.document_logo_extraction import extract_logo_presence_from_pdf
 from app.use_cases.company_name_matching import compare_company_names
 from app.use_cases.trade_license_expiry import parse_trade_license_expiry_date
@@ -53,62 +70,6 @@ _BANK_NAME_FIELDS = ("AccountName", "CompanyName", "LegalNameEnglish", "Benefici
 _AFFECTION_PLAN_PARCEL_FIELDS = ("ParcelId", "ParcelNo", "PlotNumber", "PlotNo")
 _AFFECTION_PLAN_AREA_FIELDS = ("TotalArea", "Area", "LandArea", "PlotArea")
 _GPT_FRAUD_KEYWORDS = ("fake", "tamper", "tampered", "forged", "template", "inconsistent", "fabricated", "suspicious")
-_TRADE_VAT_BASE_SCORE = 50
-_TRADE_VAT_QR_SCORE = 10
-_TRADE_VAT_VERIFICATION_SCORE = 10
-_TRADE_VAT_LOGO_SCORE = 5
-_TRADE_VAT_ISSUING_AUTHORITY_SCORE = 20
-_TRADE_VAT_GPT_MAX_SCORE = 5
-_BANK_BASE_SCORE = 75
-_BANK_LOGO_SCORE = 10
-_BANK_GPT_MAX_SCORE = 15
-_TRADE_ISSUING_AUTHORITY_ALLOWLIST = (
-    "department of economy and tourism",
-    "department of economic development",
-    "economic development",
-    "economy and tourism",
-    "ded",
-    "det",
-    "added",
-    "sedd",
-    "ajman ded",
-    "rakez",
-    "dmcc",
-    "jafza",
-    "jebel ali free zone",
-    "jebel ali free zone authority",
-    "dafza",
-    "dubai airport free zone",
-    "ifza",
-    "international free zone authority",
-    "meydan free zone",
-    "dubai south",
-    "dtec",
-    "dubai silicon oasis",
-    "difc",
-    "kizad",
-    "kezad",
-    "hamriyah free zone",
-    "sharjah airport international free zone",
-    "saif zone",
-    "sharjah free zone",
-    "fujairah free zone",
-    "umm al quwain free trade zone",
-    "uaq free trade zone",
-    "ras al khaimah economic zone",
-    "free zone authority",
-    "free zone",
-    "freezone",
-)
-_VAT_ISSUING_AUTHORITY_ALLOWLIST = (
-    "federal tax authority",
-    "fta",
-)
-_BANK_ISSUING_AUTHORITY_ALLOWLIST = (
-    "bank",
-    "branch",
-    "financial institution",
-)
 
 
 def evaluate_document_acceptance(
@@ -322,24 +283,24 @@ def _score_with_signals(
     expiry_date: date | None = None,
     is_expired: bool | None = None,
 ) -> DocumentAcceptanceResult:
-    score = _TRADE_VAT_BASE_SCORE
+    score = trade_vat_base_score()
     reasons: list[str] = []
 
     if _signal_present(payload, "qr_codes"):
-        score += _TRADE_VAT_QR_SCORE
+        score += trade_vat_qr_score()
         reasons.append("QR code present.")
     else:
         reasons.append("QR code not found.")
 
     if _signal_present(payload, "verification_urls"):
-        score += _TRADE_VAT_VERIFICATION_SCORE
+        score += trade_vat_verification_score()
         reasons.append("Verification URL present.")
     else:
         reasons.append("Verification URL not found.")
 
     if file_bytes is not None:
         if extract_logo_presence_from_pdf(file_bytes):
-            score += _TRADE_VAT_LOGO_SCORE
+            score += trade_vat_logo_score()
             reasons.append("Logo present.")
         else:
             reasons.append("Logo not found.")
@@ -368,12 +329,12 @@ def _score_bank_with_logo_and_gpt(
     payload: dict[str, Any],
     file_bytes: bytes | None = None,
 ) -> DocumentAcceptanceResult:
-    score = _BANK_BASE_SCORE
+    score = bank_base_score()
     reasons: list[str] = []
 
     if file_bytes is not None:
         if extract_logo_presence_from_pdf(file_bytes):
-            score += _BANK_LOGO_SCORE
+            score += bank_logo_score()
             reasons.append("Logo present.")
         else:
             reasons.append("Logo not found.")
@@ -401,7 +362,7 @@ def _bank_gpt_review_weight(gpt_review: dict[str, Any]) -> int:
         score = 0.0
     if score > 1:
         score = 1.0
-    return round(_BANK_GPT_MAX_SCORE * score)
+    return round(bank_gpt_max_score() * score)
 
 
 def _result(
@@ -484,16 +445,16 @@ def _validate_issuing_authority(document_type: str, results: dict[str, Any]) -> 
         return None
     lowered = authority.lower()
     if document_type == "trade":
-        if _matches_allowlist(lowered, _TRADE_ISSUING_AUTHORITY_ALLOWLIST):
-            return authority, _TRADE_VAT_ISSUING_AUTHORITY_SCORE
+        if _matches_allowlist(lowered, trade_issuing_authority_allowlist()):
+            return authority, trade_vat_issuing_authority_score()
         return None
     if document_type == "vat":
-        if _matches_allowlist(lowered, _VAT_ISSUING_AUTHORITY_ALLOWLIST):
-            return authority, _TRADE_VAT_ISSUING_AUTHORITY_SCORE
+        if _matches_allowlist(lowered, vat_issuing_authority_allowlist()):
+            return authority, trade_vat_issuing_authority_score()
         return None
     if document_type == "bank":
-        if _matches_allowlist(lowered, _BANK_ISSUING_AUTHORITY_ALLOWLIST):
-            return authority, 3
+        if _matches_allowlist(lowered, bank_issuing_authority_allowlist()):
+            return authority, bank_issuing_authority_score()
         return None
     return None
 
@@ -528,13 +489,13 @@ def _gpt_review_weight(gpt_review: dict[str, Any]) -> int:
         score = 0.0
     if score > 1:
         score = 1.0
-    return round(_TRADE_VAT_GPT_MAX_SCORE * score)
+    return round(trade_vat_gpt_max_score() * score)
 
 
 def _status_from_score(score: int) -> str:
-    if score >= 91:
+    if score >= approved_threshold():
         return "approved"
-    if score >= 81:
+    if score >= review_threshold():
         return "review"
     return "rejected"
 

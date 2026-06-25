@@ -1,5 +1,26 @@
 from dataclasses import dataclass
+import json
 import os
+from pathlib import Path
+
+
+def _load_local_settings() -> None:
+    local_settings_path = Path(__file__).resolve().parents[2] / "local.settings.json"
+    if not local_settings_path.exists():
+        return
+    try:
+        payload = json.loads(local_settings_path.read_text())
+    except Exception:
+        return
+    values = payload.get("Values")
+    if not isinstance(values, dict):
+        return
+    for key, value in values.items():
+        if isinstance(key, str) and key and os.getenv(key) is None and value is not None:
+            os.environ[key] = str(value)
+
+
+_load_local_settings()
 
 
 def _env(name: str, default: str = "") -> str:
