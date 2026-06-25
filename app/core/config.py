@@ -27,6 +27,14 @@ def _env(name: str, default: str = "") -> str:
     return (os.getenv(name) or default).strip()
 
 
+def _env_list(name: str, default) -> tuple[str, ...]:
+    raw_value = _env(name)
+    if not raw_value:
+        return tuple(default)
+    values = [item.strip().lower() for item in raw_value.split(",")]
+    return tuple(item for item in values if item)
+
+
 @dataclass(frozen=True)
 class Settings:
     foundry_project_endpoint: str = _env("FOUNDRY_PROJECT_ENDPOINT")
@@ -50,6 +58,21 @@ class Settings:
     validate_login_username: str = _env("VALIDATE_LOGIN_USERNAME")
     validate_login_password: str = _env("VALIDATE_LOGIN_PASSWORD")
     validate_login_verify_ssl: str = _env("VALIDATE_LOGIN_VERIFY_SSL", "true")
+    general_bot_system_prompt: str = _env("GENERAL_BOT_SYSTEM_PROMPT")
+    lookup_routing_prompt: str = _env("LOOKUP_ROUTING_PROMPT")
+    lookup_classification_prompt: str = _env("LOOKUP_CLASSIFICATION_PROMPT")
+    lookup_company_hints: tuple[str, ...] = _env_list(
+        "LOOKUP_COMPANY_HINTS",
+        ("llc", "l.l.c", "fze", "fzco", "ltd", "company", "co.", "co ", "group", "est", "est.", "branch", "holding"),
+    )
+    lookup_business_only_hints: tuple[str, ...] = _env_list(
+        "LOOKUP_BUSINESS_ONLY_HINTS",
+        ("trading", "industries", "industrial", "enterprise", "enterprises"),
+    )
+    company_name_trailing_suffixes: tuple[str, ...] = _env_list(
+        "COMPANY_NAME_TRAILING_SUFFIXES",
+        ("trading", "llc", "l.l.c", "co.", "co", "company", "corporation", "corp.", "corp", "branch", "establishment", "sole proprietorship", "limited", "ltd", "fze", "fzc", "pjsc"),
+    )
     azure_storage_account_url: str = _env("AZURE_STORAGE_ACCOUNT_URL")
     azure_storage_container: str = _env("AZURE_STORAGE_CONTAINER")
     azure_storage_prefix: str = _env("AZURE_STORAGE_PREFIX")
@@ -147,3 +170,27 @@ def validate_login_password() -> str:
 
 def validate_login_verify_ssl() -> bool:
     return settings.validate_login_verify_ssl.lower() in {"1", "true", "yes", "on"}
+
+
+def general_bot_system_prompt() -> str:
+    return settings.general_bot_system_prompt
+
+
+def lookup_routing_prompt() -> str:
+    return settings.lookup_routing_prompt
+
+
+def lookup_classification_prompt() -> str:
+    return settings.lookup_classification_prompt
+
+
+def lookup_company_hints() -> tuple[str, ...]:
+    return settings.lookup_company_hints
+
+
+def lookup_business_only_hints() -> tuple[str, ...]:
+    return settings.lookup_business_only_hints
+
+
+def company_name_trailing_suffixes() -> tuple[str, ...]:
+    return settings.company_name_trailing_suffixes

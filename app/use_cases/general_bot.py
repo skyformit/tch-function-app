@@ -8,7 +8,7 @@ from typing import Optional
 import azure.functions as func
 from azurefunctions.extensions.http.fastapi import Request
 
-from app.core.config import enable_tbms_lookup, foundry_project_endpoint, foundry_token_scope, general_bot_agent_id
+from app.core.config import company_name_trailing_suffixes, enable_tbms_lookup, foundry_project_endpoint, foundry_token_scope, general_bot_agent_id, general_bot_system_prompt
 from app.infrastructure.external.foundry.activity_workflow import invoke_activity_workflow
 from app.infrastructure.external.foundry.common import _with_response_metadata
 from app.infrastructure.external.foundry_client import _json_response, invoke_foundry_from_text
@@ -25,41 +25,6 @@ from app.use_cases.lookup_routing import build_lookup_payloads, classify_lookup_
 from app.use_cases.tbms.transport import _call_tbms_api
 from app.use_cases.trade_license_routing import classify_trade_license_routing
 
-
-GENERAL_BOT_SYSTEM_PROMPT = """You are a UAE supplier onboarding and compliance assistant for Trojan Construction Holdings.
-
-Return ONLY valid JSON with this exact shape:
-{
-  "ok": true,
-  "text": "Human-readable reply to the user",
-  "context": {
-    "intent": "chat|lookup|document|clarify",
-    "document_type": "unknown|trade|vat|bank|bank_offer|other",
-    "entities": {
-      "company_name": "",
-      "trade_license_number": ""
-    },
-    "next_action": "general_chat|tbms_lookup|document_review|workflow|ask_clarification",
-    "classification": {
-      "label": "company_name|trade_license_number|person_name|unknown",
-      "confidence": 0.0,
-      "reason": ""
-    }
-  }
-}
-
-Rules:
-- Use the current user message as the primary input.
-- Extract company_name only when it is explicit or clearly stated.
-- Do not copy the full user sentence into company_name.
-- Do not include trailing business suffixes in company_name, such as trading, LLC, L.L.C, CO., company, corporation, branch, establishment, or sole proprietorship.
-- Return the shortest clean company name that still identifies the business.
-- Keep trade_license_number empty unless a license-like value is present.
-- Set next_action to tbms_lookup only when the user is asking about a company or license lookup.
-- Set next_action to general_chat for greetings and general conversation.
-- If you are unsure, choose chat/unknown/general_chat.
-- Do not output markdown, code fences, or extra commentary.
-"""
 
 _CONTEXT_MODES = {"fresh", "continue", "lookup", "document_review", "chat", "workflow"}
 _SUPPLIER_TOPIC_HINTS = (
@@ -367,20 +332,7 @@ def _normalize_company_name(value: object) -> str:
     normalized = _normalize_text(value)
     if not normalized:
         return ""
-    trailing_suffixes = (
-        "trading",
-        "llc",
-        "l.l.c",
-        "co.",
-        "co",
-        "company",
-        "corporation",
-        "corp.",
-        "corp",
-        "branch",
-        "establishment",
-        "sole proprietorship",
-    )
+    trailing_suffixes = company_name_trailing_suffixes()
     while True:
         updated = normalized
         for suffix in trailing_suffixes:
@@ -398,7 +350,7 @@ def _general_bot_prompt(
     conversation_id: Optional[str] = None,
     context_mode: str = "chat",
 ) -> str:
-    prompt_parts = [GENERAL_BOT_SYSTEM_PROMPT]
+    prompt_parts = [general_bot_system_prompt()]
     context_lines: list[str] = []
     remembered_company = _normalize_text((remembered_entities or {}).get("company_name"))
     remembered_license = _normalize_text((remembered_entities or {}).get("trade_license_number"))

@@ -6,45 +6,8 @@ import re
 from functools import partial
 from typing import Any
 
+from app.core.config import lookup_routing_prompt
 from app.infrastructure.external.foundry_client import invoke_foundry_from_text
-
-LOOKUP_ROUTING_PROMPT = """You are a routing classifier for a UAE business compliance assistant.
-
-Classify the user message into exactly one routing decision:
-- tbms: the user is asking to look up a vendor/company record or trade license record
-- chat: the user is making general conversation or asking a non-lookup question
-- clarify: the user is asking for a lookup but the message is ambiguous or missing enough lookup data
-
-Return only valid JSON with this shape:
-{
-  "route": "tbms|chat|clarify",
-  "lookup_type": "company_name|trade_license_number|person_name|unknown",
-  "document_type": "trade|vat|bank_certificate|bank_offer|bank|unknown",
-  "vendor_name": "string or empty",
-  "license_no": "string or empty",
-  "confidence": 0.0,
-  "reason": "short reason"
-}
-
-Rules:
-- Prefer tbms for explicit vendor/company/company name/business name/trade name/legal name inputs.
-- Prefer tbms for explicit trade license/license no/license number/licence no inputs.
-- Prefer tbms when the message contains a clear UAE vendor lookup intent plus a numeric license value, even if the wording is informal.
-- If both company name and license number are present, extract both.
-- If the user mentions a document or upload, also classify document_type as trade, vat, bank_certificate, bank_offer, bank, or unknown.
-- Use bank_certificate for bank letters / certificates / statements.
-- Use bank_offer for bank offer letters or offer documents.
-- Use clarify only when the user clearly wants a lookup but the input is incomplete or ambiguous.
-- Use chat for greetings, identity questions, capability questions, and all unrelated conversations.
-- Do not invent company names or license numbers.
-
-Examples:
-- "my trade license number is 206558" -> {"route":"tbms","lookup_type":"trade_license_number","vendor_name":"","license_no":"206558"}
-- "vendor name Abdul Jaleel Al Saadi Trading LLC" -> {"route":"tbms","lookup_type":"company_name","vendor_name":"Abdul Jaleel Al Saadi Trading LLC","license_no":""}
-- "Abdul Jaleel Al Saadi Trading LLC 206558" -> {"route":"tbms","lookup_type":"company_name","vendor_name":"Abdul Jaleel Al Saadi Trading LLC","license_no":"206558"}
-- "my number is 206558" -> tbms if the number looks like a license value
-- "who are you" -> chat
-"""
 
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 _NUMERIC_LICENSE_PATTERN = re.compile(r"\b([A-Z]{1,5}-\d{3,}(?:\s+\d{3,})*|\d{4,}(?:\s+\d{3,})*)\b", re.IGNORECASE)
@@ -176,7 +139,7 @@ def _validate_decision(decision: dict[str, Any], text: str) -> dict[str, Any]:
 
 
 def _build_prompt(text: str) -> str:
-    return f"{LOOKUP_ROUTING_PROMPT}\n\nUser message:\n{text.strip()}"
+    return f"{lookup_routing_prompt()}\n\nUser message:\n{text.strip()}"
 
 
 async def classify_lookup_route(text: str, config: dict) -> dict[str, Any]:

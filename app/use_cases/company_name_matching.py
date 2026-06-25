@@ -5,26 +5,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any
 
-
-_TRAILING_SUFFIXES = (
-    "trading",
-    "llc",
-    "l.l.c",
-    "co.",
-    "co",
-    "company",
-    "corporation",
-    "corp.",
-    "corp",
-    "branch",
-    "establishment",
-    "sole proprietorship",
-    "limited",
-    "ltd",
-    "fze",
-    "fzc",
-    "pjsc",
-)
+from app.core.config import company_name_trailing_suffixes
 
 
 @dataclass(frozen=True)
@@ -69,8 +50,7 @@ def normalize_company_name(value: Any) -> str:
         ("co",),
         ("company",),
         ("est",),
-        ("trading",),
-    ]
+    ] + [(suffix,) for suffix in company_name_trailing_suffixes() if " " not in suffix and suffix not in {"llc", "l.l.c", "co.", "co", "company", "ltd", "fze", "fzc", "pjsc"}]
     while normalized_tokens:
         matched = False
         for suffix in suffix_sequences:
